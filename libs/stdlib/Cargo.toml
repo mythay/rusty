@@ -39,7 +39,7 @@ tempfile.workspace = true
 cc.workspace = true
 
 [features]
-default = []
+default = ["mock_time"]
 mock_time = []
 debug = []
 

@@ -22,7 +22,7 @@ pub mod flanks;
 pub mod numerical_functions;
 // pub mod string_conversion;
 // pub mod string_functions;
-// pub mod timers;
+pub mod timers;
 pub mod types;
 pub mod utils;
 pub mod validation_functions;

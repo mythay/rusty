@@ -5,7 +5,7 @@ use std::process::Command;
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let mut args = vec![
-        "plc".to_owned(),
+        // "plc".to_owned(),
         "iec61131-st/*.st".to_owned(),
         "-c".to_owned(),
         "--generate-external-constructors".to_owned(),
@@ -27,14 +27,24 @@ fn main() {
     #[cfg(target_os = "windows")]
     args.push("--single-module".to_owned());
 
-    // plc_driver::compile(&args).unwrap();
+    Command::new("plc").args(args).status().unwrap();
+
+    // Archive the object file into a static library so rustc can find it.
     // #[cfg(not(target_os = "windows"))]
-    // Command::new("ar").args(["crs", "libst.a", "st.o"]).current_dir(Path::new(&out_dir)).status().unwrap();
+    Command::new("ar")
+        .args(["crs", "libst.a", "st.o"])
+        .current_dir(Path::new(&out_dir))
+        .status()
+        .unwrap();
     // #[cfg(target_os = "windows")]
-    // Command::new("lld-link").args(["/LIB", "st.o"]).current_dir(Path::new(&out_dir)).status().unwrap();
+    // Command::new("lld-link")
+    //     .args(["/LIB", "st.o"])
+    //     .current_dir(Path::new(&out_dir))
+    //     .status()
+    //     .unwrap();
 
     //link the object file
     println!("cargo:rustc-link-search=native={out_dir}");
     println!("cargo:rerun-if-changed=iec61131-st/");
-    // println!("cargo:rustc-link-lib=static:+whole-archive=st"); //create a whole archive without throwing away any object files (https://github.com/rust-lang/rust/pull/105601).
+    println!("cargo:rustc-link-lib=static:+whole-archive=st"); //create a whole archive without throwing away any object files (https://github.com/rust-lang/rust/pull/105601).
 }

@@ -27,14 +27,14 @@ fn main() {
     #[cfg(target_os = "windows")]
     args.push("--single-module".to_owned());
 
-    plc_driver::compile(&args).unwrap();
-    #[cfg(not(target_os = "windows"))]
-    Command::new("ar").args(["crs", "libst.a", "st.o"]).current_dir(Path::new(&out_dir)).status().unwrap();
-    #[cfg(target_os = "windows")]
-    Command::new("lld-link").args(["/LIB", "st.o"]).current_dir(Path::new(&out_dir)).status().unwrap();
+    // plc_driver::compile(&args).unwrap();
+    // #[cfg(not(target_os = "windows"))]
+    // Command::new("ar").args(["crs", "libst.a", "st.o"]).current_dir(Path::new(&out_dir)).status().unwrap();
+    // #[cfg(target_os = "windows")]
+    // Command::new("lld-link").args(["/LIB", "st.o"]).current_dir(Path::new(&out_dir)).status().unwrap();
 
     //link the object file
     println!("cargo:rustc-link-search=native={out_dir}");
     println!("cargo:rerun-if-changed=iec61131-st/");
-    println!("cargo:rustc-link-lib=static:+whole-archive=st"); //create a whole archive without throwing away any object files (https://github.com/rust-lang/rust/pull/105601).
+    // println!("cargo:rustc-link-lib=static:+whole-archive=st"); //create a whole archive without throwing away any object files (https://github.com/rust-lang/rust/pull/105601).
 }

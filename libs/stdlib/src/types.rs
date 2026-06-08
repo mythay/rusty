@@ -1,4 +1,4 @@
-use std::slice;
+use core::slice;
 
 /// Integer type macros
 macro_rules! define_int_type {

@@ -1,3 +1,5 @@
+use num::Float;
+
 /// .
 /// Rounds a REAL (f32) value
 ///

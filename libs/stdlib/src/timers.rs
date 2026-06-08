@@ -1,13 +1,9 @@
-use std::time::Duration;
-#[cfg(not(feature = "mock_time"))]
-use std::time::Instant;
+use core::time::Duration;
 
-#[cfg(feature = "mock_time")]
 use test_time_helpers::Instant;
 
 use crate::utils::Signal;
 
-#[cfg(feature = "mock_time")]
 pub mod test_time_helpers;
 
 pub type Time = i64;
@@ -52,7 +48,7 @@ impl TimerParams {
     /// Sets the elapsed time to either the preset time or the real elapsed time, whatever is smaller
     fn update_elapsed_time(&mut self) {
         if self.is_running() {
-            self.set_elapsed_time(std::cmp::min(
+            self.set_elapsed_time(core::cmp::min(
                 self.preset_time,
                 self.get_run_time().expect("Timer should be running").as_nanos() as i64,
             ));

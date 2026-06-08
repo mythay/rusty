@@ -39,15 +39,11 @@ tempfile.workspace = true
 cc.workspace = true
 
 [features]
-default = ["mock_time"]
+default = []
 mock_time = []
+std = []
 debug = []
 
 [lib]
 crate-type = ["staticlib"]
 
-[profile.release]
-panic = "abort"
-
-[profile.dev]
-panic = "abort"

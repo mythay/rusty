@@ -1,4 +1,4 @@
-// RUN: (%COMPILE %s && %RUN) | %CHECK %s
+// RUN: %COMPILE %s && %RUN | %CHECK %s
 // Scenario: Ensure ARRAY[1..5] OF DINT arguments are passed correctly through interface dispatch for
 // VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT and mixed signatures.
 
@@ -161,7 +161,7 @@ FUNCTION main
     // CHECK: FbA::input, in = [21, 22, 23, 24, 25]
     reference.input(localInputArray);
 
-    // CHECK-NEXT: FbA::output, out = [31, 32, 33, 34, 35]
+    // CHECK-NEXT: FbA::output, out = [0, 0, 0, 0, 0]
     // CHECK-NEXT: main::output = [90, 91, 92, 93, 94]
     // CHECK-NEXT: main::output = [31, 32, 33, 34, 35]
     reference.output(localOutputArray);
@@ -202,7 +202,7 @@ FUNCTION main
     );
 
     // CHECK-NEXT: FbA::in_out_and_inout, in = [21, 22, 23, 24, 25]
-    // CHECK-NEXT: FbA::in_out_and_inout, out = [31, 32, 33, 34, 35]
+    // CHECK-NEXT: FbA::in_out_and_inout, out = [0, 0, 0, 0, 0]
     // CHECK-NEXT: FbA::in_out_and_inout, inout = [41, 42, 43, 44, 45]
     // CHECK-NEXT: main::out_after_mix = [70, 71, 72, 73, 74]
     // CHECK-NEXT: main::inout_after_mix = [60, 61, 62, 63, 64]

@@ -422,6 +422,8 @@ fn function_get_a_method_with_by_ref_parameters() {
       store i16 1, ptr %v, align [filtered]
       store i16 2, ptr %vt, align [filtered]
       store i32 0, ptr %main_fun, align [filtered]
+      %3 = load ptr, ptr %o, align [filtered]
+      store i64 0, ptr %3, align [filtered]
       %main_fun_ret = load i32, ptr %main_fun, align [filtered]
       ret i32 %main_fun_ret
     }
@@ -462,6 +464,7 @@ fn calling_a_function() {
       %z = getelementptr inbounds nuw %prg, ptr %0, i32 0, i32 1
       %load_x = load i16, ptr %x, align [filtered]
       %1 = alloca i64, align [filtered]
+      store i64 0, ptr %1, align [filtered]
       %call = call i32 @main_fun(i16 %load_x, ptr %z, ptr %1)
       ret void
     }
@@ -480,6 +483,8 @@ fn calling_a_function() {
       store i16 1, ptr %v, align [filtered]
       store i16 2, ptr %vt, align [filtered]
       store i32 0, ptr %main_fun, align [filtered]
+      %3 = load ptr, ptr %o, align [filtered]
+      store i64 0, ptr %3, align [filtered]
       %main_fun_ret = load i32, ptr %main_fun, align [filtered]
       ret i32 %main_fun_ret
     }
@@ -534,20 +539,29 @@ fn return_a_complex_type_from_function() {
     entry:
       %s = getelementptr inbounds nuw %prg, ptr %0, i32 0, i32 0
       %__foo0 = alloca [81 x i8], align [filtered]
+      call void @llvm.lifetime.start.p0(i64 -1, ptr %__foo0)
       call void @llvm.memset.p0.i64(ptr align [filtered] %__foo0, i8 0, i64 ptrtoint (ptr getelementptr ([81 x i8], ptr null, i32 1) to i64), i1 false)
       call void @foo(ptr %__foo0)
       call void @llvm.memcpy.p0.p0.i32(ptr align [filtered] %s, ptr align [filtered] %__foo0, i32 80, i1 false)
+      call void @llvm.lifetime.end.p0(i64 -1, ptr %__foo0)
       ret void
     }
 
     ; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: readwrite)
     declare void @llvm.memcpy.p0.p0.i32(ptr noalias writeonly captures(none), ptr noalias readonly captures(none), i32, i1 immarg) #0
 
+    ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
+    declare void @llvm.lifetime.start.p0(i64 immarg, ptr captures(none)) #1
+
     ; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: write)
-    declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #1
+    declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #2
+
+    ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
+    declare void @llvm.lifetime.end.p0(i64 immarg, ptr captures(none)) #1
 
     attributes #0 = { nocallback nofree nounwind willreturn memory(argmem: readwrite) }
-    attributes #1 = { nocallback nofree nounwind willreturn memory(argmem: write) }
+    attributes #1 = { nocallback nofree nosync nounwind willreturn memory(argmem: readwrite) }
+    attributes #2 = { nocallback nofree nounwind willreturn memory(argmem: write) }
     "#);
 }
 

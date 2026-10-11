@@ -1,19 +1,19 @@
-// RUN: (%COMPILE %s && %RUN) | %CHECK %s
+// RUN: %COMPILE %s && %RUN | %CHECK %s
 //
 // Regression test for stack growth caused by lowered loop temporaries.
 // Nested FOR loops are desugared into nested WHILE TRUE loops with synthetic
 // locals, e.g. roughly:
 //
-//   alloca ran_once_1: BOOL
-//   alloca is_incrementing_1: BOOL
+//   alloca __ran_once_1: BOOL
+//   alloca __is_incrementing_1: BOOL
 //   i := 1
-//   is_incrementing_1 := TRUE
+//   __is_incrementing_1 := TRUE
 //   WHILE TRUE DO
 //       ...
-//       alloca ran_once_0: BOOL
-//       alloca is_incrementing_0: BOOL
+//       alloca __ran_once_0: BOOL
+//       alloca __is_incrementing_0: BOOL
 //       j := 1
-//       is_incrementing_0 := TRUE
+//       __is_incrementing_0 := TRUE
 //       WHILE TRUE DO
 //           ...
 //       END_WHILE

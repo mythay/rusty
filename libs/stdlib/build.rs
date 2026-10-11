@@ -11,8 +11,11 @@ const MCU_EXCLUDED_SOURCES: &[&str] = &[
     "extra_functions.st",
     "string_conversion.st",
     "string_functions.st",
+    "string_to_conversions.st",
+    "to_bit.st",
     "to_date_time.st",
     "to_string.st",
+    "to_string_conversions.st",
 ];
 
 fn main() {

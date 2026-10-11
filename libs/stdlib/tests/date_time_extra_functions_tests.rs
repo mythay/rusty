@@ -1,4 +1,5 @@
 use common::{compile_and_run, get_includes};
+use iec61131std::date_time_extra_functions as dtef;
 
 // Import common functionality into the integration tests
 mod common;
@@ -28,15 +29,14 @@ fn concat_date_tod() {
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
     let mut maintype = SingleType::default();
-    let res: i64 = compile_and_run(sources, includes, &mut maintype);
-    let dt_2010y_3m_12d_12h_30m_15s_121121121ns = chrono::NaiveDate::from_ymd_opt(2010, 3, 12)
+    let res: u32 = compile_and_run(sources, includes, &mut maintype);
+    let dt_2010y_3m_12d_12h_30m_15s = chrono::NaiveDate::from_ymd_opt(2010, 3, 12)
         .unwrap()
-        .and_hms_nano_opt(12, 30, 15, 121121121)
+        .and_hms_opt(12, 30, 15)
         .unwrap()
         .and_utc()
-        .timestamp_nanos_opt()
-        .unwrap();
-    assert_eq!(res, dt_2010y_3m_12d_12h_30m_15s_121121121ns);
+        .timestamp() as u32;
+    assert_eq!(res, dt_2010y_3m_12d_12h_30m_15s);
 }
 
 #[test]
@@ -85,15 +85,14 @@ fn concat_date_signed_ints() {
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
-    let mut maintype = MainType::<i64>::default();
+    let mut maintype = MainType::<u32>::default();
     let _: i64 = compile_and_run(sources, includes, &mut maintype);
     let date_2000y_1m_1d = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap()
         .and_utc()
-        .timestamp_nanos_opt()
-        .unwrap();
+        .timestamp() as u32;
     assert_eq!(maintype.a, date_2000y_1m_1d);
     assert_eq!(maintype.b, date_2000y_1m_1d);
     assert_eq!(maintype.c, date_2000y_1m_1d);
@@ -114,15 +113,14 @@ fn concat_date_unsigned_ints() {
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
-    let mut maintype = MainType::<i64>::default();
+    let mut maintype = MainType::<u32>::default();
     let _: i64 = compile_and_run(sources, includes, &mut maintype);
     let date_2000y_1m_1d = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap()
         .and_utc()
-        .timestamp_nanos_opt()
-        .unwrap();
+        .timestamp() as u32;
     assert_eq!(maintype.a, date_2000y_1m_1d);
     assert_eq!(maintype.b, date_2000y_1m_1d);
     assert_eq!(maintype.c, date_2000y_1m_1d);
@@ -145,11 +143,10 @@ fn concat_tod_signed_ints() {
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
-    let mut maintype = MainType::<i64>::default();
+    let mut maintype = MainType::<u32>::default();
     let _: i64 = compile_and_run(sources, includes, &mut maintype);
-    assert_eq!(maintype.a, get_time_from_hms_milli(20, 15, 12, 34).and_utc().timestamp_nanos_opt().unwrap());
-    let tod_20h_15m_12s_341ms =
-        get_time_from_hms_milli(20, 15, 12, 341).and_utc().timestamp_nanos_opt().unwrap();
+    assert_eq!(maintype.a, get_time_from_hms_milli(20, 15, 12, 34).and_utc().timestamp_millis() as u32);
+    let tod_20h_15m_12s_341ms = get_time_from_hms_milli(20, 15, 12, 341).and_utc().timestamp_millis() as u32;
     assert_eq!(maintype.b, tod_20h_15m_12s_341ms);
     assert_eq!(maintype.c, tod_20h_15m_12s_341ms);
     assert_eq!(maintype.d, tod_20h_15m_12s_341ms);
@@ -172,11 +169,10 @@ fn concat_tod_unsigned_ints() {
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
-    let mut maintype = MainType::<i64>::default();
+    let mut maintype = MainType::<u32>::default();
     let _: i64 = compile_and_run(sources, includes, &mut maintype);
-    assert_eq!(maintype.a, get_time_from_hms_milli(20, 15, 12, 34).and_utc().timestamp_nanos_opt().unwrap());
-    let tod_20h_15m_12s_341ms =
-        get_time_from_hms_milli(20, 15, 12, 341).and_utc().timestamp_nanos_opt().unwrap();
+    assert_eq!(maintype.a, get_time_from_hms_milli(20, 15, 12, 34).and_utc().timestamp_millis() as u32);
+    let tod_20h_15m_12s_341ms = get_time_from_hms_milli(20, 15, 12, 341).and_utc().timestamp_millis() as u32;
     assert_eq!(maintype.b, tod_20h_15m_12s_341ms);
     assert_eq!(maintype.c, tod_20h_15m_12s_341ms);
     assert_eq!(maintype.d, tod_20h_15m_12s_341ms);
@@ -187,10 +183,10 @@ fn concat_ltod_signed_ints() {
     let src = "
     PROGRAM main
     VAR
-        a : TOD;
-        b : TOD;
-        c : TOD;
-        d : TOD;
+        a : LTOD;
+        b : LTOD;
+        c : LTOD;
+        d : LTOD;
     END_VAR
         a := CONCAT_LTOD(SINT#20,SINT#15,SINT#12,SINT#34);
         b := CONCAT_LTOD(INT#20,INT#15,INT#12,INT#341);
@@ -214,10 +210,10 @@ fn concat_ltod_unsigned_ints() {
     let src = "
     PROGRAM main
     VAR
-        a : TOD;
-        b : TOD;
-        c : TOD;
-        d : TOD;
+        a : LTOD;
+        b : LTOD;
+        c : LTOD;
+        d : LTOD;
     END_VAR
         a := CONCAT_LTOD(USINT#20,USINT#15,USINT#12,USINT#34);
         b := CONCAT_LTOD(UINT#20,UINT#15,UINT#12,UINT#341);
@@ -251,18 +247,17 @@ fn concat_dt_signed_ints() {
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
-    let mut maintype = MainType::<i64>::default();
+    let mut maintype = MainType::<u32>::default();
     let _: i64 = compile_and_run(sources, includes, &mut maintype);
-    let dt_2000y_1m_2d_20h_15m_12s_111ms = chrono::NaiveDate::from_ymd_opt(2000, 1, 2)
+    let dt_2000y_1m_2d_20h_15m_12s = chrono::NaiveDate::from_ymd_opt(2000, 1, 2)
         .unwrap()
-        .and_hms_milli_opt(20, 15, 12, 111)
+        .and_hms_opt(20, 15, 12)
         .unwrap()
         .and_utc()
-        .timestamp_nanos_opt()
-        .unwrap();
-    assert_eq!(maintype.a, dt_2000y_1m_2d_20h_15m_12s_111ms);
-    assert_eq!(maintype.b, dt_2000y_1m_2d_20h_15m_12s_111ms);
-    assert_eq!(maintype.c, dt_2000y_1m_2d_20h_15m_12s_111ms);
+        .timestamp() as u32;
+    assert_eq!(maintype.a, dt_2000y_1m_2d_20h_15m_12s);
+    assert_eq!(maintype.b, dt_2000y_1m_2d_20h_15m_12s);
+    assert_eq!(maintype.c, dt_2000y_1m_2d_20h_15m_12s);
 }
 
 #[test]
@@ -280,18 +275,17 @@ fn concat_dt_unsigned_ints() {
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
-    let mut maintype = MainType::<i64>::default();
+    let mut maintype = MainType::<u32>::default();
     let _: i64 = compile_and_run(sources, includes, &mut maintype);
-    let dt_2000y_1m_2d_20h_15m_12s_111ms = chrono::NaiveDate::from_ymd_opt(2000, 1, 2)
+    let dt_2000y_1m_2d_20h_15m_12s = chrono::NaiveDate::from_ymd_opt(2000, 1, 2)
         .unwrap()
-        .and_hms_milli_opt(20, 15, 12, 111)
+        .and_hms_opt(20, 15, 12)
         .unwrap()
         .and_utc()
-        .timestamp_nanos_opt()
-        .unwrap();
-    assert_eq!(maintype.a, dt_2000y_1m_2d_20h_15m_12s_111ms);
-    assert_eq!(maintype.b, dt_2000y_1m_2d_20h_15m_12s_111ms);
-    assert_eq!(maintype.c, dt_2000y_1m_2d_20h_15m_12s_111ms);
+        .timestamp() as u32;
+    assert_eq!(maintype.a, dt_2000y_1m_2d_20h_15m_12s);
+    assert_eq!(maintype.b, dt_2000y_1m_2d_20h_15m_12s);
+    assert_eq!(maintype.c, dt_2000y_1m_2d_20h_15m_12s);
 }
 
 #[test]
@@ -614,7 +608,7 @@ fn split_ltod_int() {
         c : INT; // second
         d : INT; // millisecond
     END_VAR
-        SPLIT_TOD(LTOD#14:12:03.123, a, b, c, d);
+        SPLIT_LTOD(LTOD#14:12:03.123, a, b, c, d);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -636,7 +630,7 @@ fn split_ltod_uint() {
         c : UINT; // second
         d : UINT; // millisecond
     END_VAR
-        SPLIT_TOD(LTOD#14:12:03.123, a, b, c, d);
+        SPLIT_LTOD(LTOD#14:12:03.123, a, b, c, d);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -658,7 +652,7 @@ fn split_ltod_dint() {
         c : DINT; // second
         d : DINT; // millisecond
     END_VAR
-        SPLIT_TOD(LTOD#14:12:03.123, a, b, c, d);
+        SPLIT_LTOD(LTOD#14:12:03.123, a, b, c, d);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -680,7 +674,7 @@ fn split_ltod_udint() {
         c : UDINT; // second
         d : UDINT; // millisecond
     END_VAR
-        SPLIT_TOD(LTOD#14:12:03.123, a, b, c, d);
+        SPLIT_LTOD(LTOD#14:12:03.123, a, b, c, d);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -702,7 +696,7 @@ fn split_ltod_lint() {
         c : LINT; // second
         d : LINT; // millisecond
     END_VAR
-        SPLIT_TOD(LTOD#14:12:03.123, a, b, c, d);
+        SPLIT_LTOD(LTOD#14:12:03.123, a, b, c, d);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -724,7 +718,7 @@ fn split_ltod_ulint() {
         c : ULINT; // second
         d : ULINT; // millisecond
     END_VAR
-        SPLIT_TOD(LTOD#14:12:03.123, a, b, c, d);
+        SPLIT_LTOD(LTOD#14:12:03.123, a, b, c, d);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -761,7 +755,7 @@ fn split_dt_int() {
     assert_eq!(maintype.d, 14); // hour
     assert_eq!(maintype.e, 12); // minute
     assert_eq!(maintype.f, 3); // second
-    assert_eq!(maintype.g, 123); // millisecond
+    assert_eq!(maintype.g, 0); // millisecond
 }
 
 #[test]
@@ -789,7 +783,7 @@ fn split_dt_uint() {
     assert_eq!(maintype.d, 14); // hour
     assert_eq!(maintype.e, 12); // minute
     assert_eq!(maintype.f, 3); // second
-    assert_eq!(maintype.g, 123); // millisecond
+    assert_eq!(maintype.g, 0); // millisecond
 }
 
 #[test]
@@ -817,7 +811,7 @@ fn split_dt_dint() {
     assert_eq!(maintype.d, 14); // hour
     assert_eq!(maintype.e, 12); // minute
     assert_eq!(maintype.f, 3); // second
-    assert_eq!(maintype.g, 123); // millisecond
+    assert_eq!(maintype.g, 0); // millisecond
 }
 
 #[test]
@@ -845,7 +839,7 @@ fn split_dt_udint() {
     assert_eq!(maintype.d, 14); // hour
     assert_eq!(maintype.e, 12); // minute
     assert_eq!(maintype.f, 3); // second
-    assert_eq!(maintype.g, 123); // millisecond
+    assert_eq!(maintype.g, 0); // millisecond
 }
 
 #[test]
@@ -873,7 +867,7 @@ fn split_dt_lint() {
     assert_eq!(maintype.d, 14); // hour
     assert_eq!(maintype.e, 12); // minute
     assert_eq!(maintype.f, 3); // second
-    assert_eq!(maintype.g, 123); // millisecond
+    assert_eq!(maintype.g, 0); // millisecond
 }
 
 #[test]
@@ -901,7 +895,7 @@ fn split_dt_ulint() {
     assert_eq!(maintype.d, 14); // hour
     assert_eq!(maintype.e, 12); // minute
     assert_eq!(maintype.f, 3); // second
-    assert_eq!(maintype.g, 123); // millisecond
+    assert_eq!(maintype.g, 0); // millisecond
 }
 
 #[test]
@@ -917,7 +911,7 @@ fn split_ldt_int() {
         f : INT; // second
         g : INT; // millisecond
     END_VAR
-        SPLIT_DT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
+        SPLIT_LDT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -945,7 +939,7 @@ fn split_ldt_uint() {
         f : UINT; // second
         g : UINT; // millisecond
     END_VAR
-        SPLIT_DT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
+        SPLIT_LDT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -973,7 +967,7 @@ fn split_ldt_dint() {
         f : DINT; // second
         g : DINT; // millisecond
     END_VAR
-        SPLIT_DT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
+        SPLIT_LDT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -1001,7 +995,7 @@ fn split_ldt_udint() {
         f : UDINT; // second
         g : UDINT; // millisecond
     END_VAR
-        SPLIT_DT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
+        SPLIT_LDT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -1029,7 +1023,7 @@ fn split_ldt_lint() {
         f : LINT; // second
         g : LINT; // millisecond
     END_VAR
-        SPLIT_DT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
+        SPLIT_LDT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -1057,7 +1051,7 @@ fn split_ldt_ulint() {
         f : ULINT; // second
         g : ULINT; // millisecond
     END_VAR
-        SPLIT_DT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
+        SPLIT_LDT(LDT#2000-01-02-14:12:03.123, a, b, c, d, e, f, g);
     END_PROGRAM";
     let sources = vec![src.into()];
     let includes = get_includes(&["date_time_extra_functions.st"]);
@@ -1092,4 +1086,43 @@ fn day_of_week() {
     assert_eq!(maintype.a, 2);
     assert_eq!(maintype.b, 0);
     assert_eq!(maintype.c, 6);
+}
+
+// Unrepresentable constructor inputs yield 0 (epoch / midnight) instead of panicking;
+// dates outside the representable range clamp to the nearest bound.
+#[test]
+fn concat_date_with_invalid_fields_yields_epoch() {
+    assert_eq!(dtef::concat_date(2024, 13, 45), 0);
+    assert_eq!(dtef::concat_date(2023, 2, 29), 0);
+    assert_eq!(dtef::CONCAT_DATE__INT(2024, -1, 1), 0);
+}
+
+#[test]
+fn concat_date_clamps_to_date_range() {
+    assert_eq!(dtef::concat_date(1969, 6, 1), 0);
+    assert_eq!(dtef::concat_date(2200, 1, 1), u32::MAX);
+}
+
+#[test]
+fn concat_date_with_valid_fields_is_unchanged() {
+    assert_eq!(dtef::concat_date(2024, 2, 29), 1_709_164_800);
+}
+
+#[test]
+fn concat_tod_with_invalid_fields_yields_midnight() {
+    assert_eq!(dtef::concat_tod(25, 0, 0, 0), 0);
+    assert_eq!(dtef::concat_tod(0, 60, 0, 0), 0);
+    assert_eq!(dtef::CONCAT_TOD__SINT(-1, 0, 0, 0), 0);
+}
+
+#[test]
+fn concat_ldt_with_invalid_fields_yields_epoch_defaults() {
+    assert_eq!(dtef::CONCAT_LDT__INT(2024, 13, 1, 0, 0, 0, 0), 0);
+    assert_eq!(dtef::concat_ldt(1969, 6, 1, 1, 0, 0, 0), 3_600_000_000_000);
+}
+
+#[test]
+fn concat_date_ltod_wraps_on_overflow() {
+    assert_eq!(dtef::CONCAT_DATE_LTOD(86_400, 3_600_000_000_000), 90_000_000_000_000);
+    assert_eq!(dtef::CONCAT_DATE_LTOD(u32::MAX, i64::MAX), -4_928_404_741_854_775_809);
 }

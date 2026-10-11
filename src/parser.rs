@@ -315,7 +315,7 @@ fn parse_pou(
             PouType::Method { .. } => "a method name",
             PouType::Init | PouType::ProjectInit => "a POU name",
         };
-        let (name, name_location) = expect_name_slot(lexer, pou_slot_label)
+        let (name, name_location) = parse_pou_name(lexer, linkage, pou_slot_label)
             .unwrap_or_else(|| ("".to_string(), SourceLocation::undefined()));
 
         let generics = parse_generics(lexer);
@@ -942,6 +942,21 @@ fn expect_name_slot(lexer: &mut ParseSession, slot_label: &'static str) -> Optio
     None
 }
 
+/// Consumes the name of a POU. A builtin may take the name of an operator keyword, e.g. `FUNCTION AND`,
+/// user code may not.
+fn parse_pou_name(
+    lexer: &mut ParseSession,
+    linkage: LinkageType,
+    slot_label: &'static str,
+) -> Option<(String, SourceLocation)> {
+    if linkage == LinkageType::BuiltIn && lexer.token.classes().contains(&TokenClass::OperatorFunction) {
+        let name = lexer.slice_and_advance();
+        return Some((name, lexer.last_location()));
+    }
+
+    expect_name_slot(lexer, slot_label)
+}
+
 fn parse_implementation(
     lexer: &mut ParseSession,
     linkage: LinkageType,
@@ -1169,6 +1184,7 @@ fn parse_pointer_definition(
     is_function: bool,
 ) -> Option<(DataTypeDeclaration, Option<AstNode>)> {
     parse_data_type_definition(lexer, None).map(|(decl, initializer)| {
+        let end = decl.get_location().to_range().map_or(lexer.last_range.end, |range| range.end);
         (
             DataTypeDeclaration::Definition {
                 data_type: Box::new(DataType::PointerType {
@@ -1178,8 +1194,7 @@ fn parse_pointer_definition(
                     type_safe,
                     is_function,
                 }),
-                // FIXME: this currently includes the initializer in the sourcelocation, resulting in 'REF_TO A := B' when creating a slice
-                location: lexer.source_range_factory.create_range(start_pos..lexer.last_range.end),
+                location: lexer.source_range_factory.create_range(start_pos..end),
                 scope: lexer.scope.clone(),
             },
             initializer,
@@ -1612,7 +1627,13 @@ fn parse_variable_block(lexer: &mut ParseSession, linkage: LinkageType) -> Varia
     let location = lexer.location();
     let variable_block_type = parse_variable_block_type(lexer);
 
-    let constant = try_consume_var_modifier(lexer, KeywordConstant);
+    // Ignore the constant flag, i.e. yield false, for VAR_INPUT blocks; no constant semantics
+    // (validation, codegen) apply to their members
+    // XXX: Not particularly clean because the AST no longer reflects the users input, but this
+    // is the least invasive option making CONSTANT a no-op on VAR_INPUT without touching the
+    // index, const evaluator, etc.; required due to CodeSys compatibility
+    let constant = try_consume_var_modifier(lexer, KeywordConstant)
+        && !matches!(variable_block_type, VariableBlockType::Input(_));
     let retain = try_consume_var_modifier(lexer, KeywordRetain);
     try_consume_var_modifier(lexer, KeywordNonRetain);
 

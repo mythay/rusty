@@ -45,6 +45,44 @@ fn bool_literal_casts_are_validated() {
 }
 
 #[test]
+fn numeric_literal_casts_reject_bool_literals() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        PROGRAM prg
+        VAR
+            x : DINT;
+            r : REAL;
+        END_VAR
+            x := DINT#TRUE;
+            x := INT#FALSE;
+            r := REAL#TRUE;
+            x := DINT#1;
+        END_PROGRAM
+        ",
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E054]: Literal true is not compatible to DINT
+      ┌─ <internal>:7:18
+      │
+    7 │             x := DINT#TRUE;
+      │                  ^^^^^^^^^ Literal true is not compatible to DINT
+
+    error[E054]: Literal false is not compatible to INT
+      ┌─ <internal>:8:18
+      │
+    8 │             x := INT#FALSE;
+      │                  ^^^^^^^^^ Literal false is not compatible to INT
+
+    error[E054]: Literal true is not compatible to REAL
+      ┌─ <internal>:9:18
+      │
+    9 │             r := REAL#TRUE;
+      │                  ^^^^^^^^^ Literal true is not compatible to REAL
+    ");
+}
+
+#[test]
 fn string_literal_casts_are_validated() {
     let diagnostics = parse_and_validate_buffered(
         r#"
@@ -205,4 +243,150 @@ fn there_should_be_no_downcast_warning_for_literal_assignment_to_integer_types()
     );
 
     assert_snapshot!(&diagnostics, @r"");
+}
+
+#[test]
+fn short_temporal_literals_overflow_and_underflow_produce_warnings() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        PROGRAM prg
+        VAR
+            d_underflow : DATE := DATE#1969-12-31;
+            d_overflow : DATE := DATE#2500-01-01;
+            dt_underflow : DT := DT#1969-12-31-23:59:59;
+            dt_overflow : DT := DT#2500-01-01-00:00:00;
+            t_underflow : TIME := TIME#-1ms;
+            t_overflow : TIME := TIME#4294967296ms;
+            tod_overflow : TOD := TOD#24:00:00;
+        END_VAR
+        END_PROGRAM
+       "#,
+    );
+
+    let normalized = diagnostics.lines().map(str::trim_start).collect::<Vec<_>>().join("\n");
+    assert_snapshot!(normalized, @r"
+    warning[E148]: DATE literal underflow detected
+    ┌─ <internal>:4:35
+    │
+    4 │             d_underflow : DATE := DATE#1969-12-31;
+    │                                   ^^^^^^^^^^^^^^^ DATE literal underflow detected
+
+    warning[E148]: DATE literal out-of-range detected
+    ┌─ <internal>:5:34
+    │
+    5 │             d_overflow : DATE := DATE#2500-01-01;
+    │                                  ^^^^^^^^^^^^^^^ DATE literal out-of-range detected
+
+    warning[E148]: DATE_AND_TIME literal underflow detected
+    ┌─ <internal>:6:34
+    │
+    6 │             dt_underflow : DT := DT#1969-12-31-23:59:59;
+    │                                  ^^^^^^^^^^^^^^^^^^^^^^ DATE_AND_TIME literal underflow detected
+
+    warning[E148]: DATE_AND_TIME literal out-of-range detected
+    ┌─ <internal>:7:33
+    │
+    7 │             dt_overflow : DT := DT#2500-01-01-00:00:00;
+    │                                 ^^^^^^^^^^^^^^^^^^^^^^ DATE_AND_TIME literal out-of-range detected
+
+    warning[E148]: TIME literal underflow detected
+    ┌─ <internal>:8:35
+    │
+    8 │             t_underflow : TIME := TIME#-1ms;
+    │                                   ^^^^^^^^^ TIME literal underflow detected
+
+    warning[E148]: TIME literal overflow detected
+    ┌─ <internal>:9:34
+    │
+    9 │             t_overflow : TIME := TIME#4294967296ms;
+    │                                  ^^^^^^^^^^^^^^^^^ TIME literal overflow detected
+
+    warning[E148]: TIME_OF_DAY literal out-of-range detected
+    ┌─ <internal>:10:35
+    │
+    10 │             tod_overflow : TOD := TOD#24:00:00;
+    │                                   ^^^^^^^^^^^^ TIME_OF_DAY literal out-of-range detected
+    ");
+}
+
+#[test]
+fn long_temporal_literals_do_not_produce_short_range_warnings() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        PROGRAM prg
+        VAR
+            d : LDATE := LDATE#2100-01-01;
+            dt : LDT := LDT#2100-01-01-00:00:00;
+            t : LTIME := LTIME#-1ms;
+            tod : LTOD := LTOD#23:59:59;
+        END_VAR
+        END_PROGRAM
+       "#,
+    );
+
+    let normalized = diagnostics.lines().map(str::trim_start).collect::<Vec<_>>().join("\n");
+    assert_snapshot!(normalized, @r"");
+}
+
+#[test]
+fn signed_and_grouped_duration_literals_are_accepted() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        PROGRAM prg
+        VAR
+            plus : TIME := T#+1s;
+            grouped : TIME := T#1_000ms;
+            grouped_fraction : LTIME := LTIME#1_000.000_5ms;
+            big_ns : LTIME := LTIME#5000000000ns;
+            exact_max : LTIME := LTIME#106751d23h47m16s854ms775us807ns;
+        END_VAR
+        END_PROGRAM
+       "#,
+    );
+
+    let normalized = diagnostics.lines().map(str::trim_start).collect::<Vec<_>>().join("\n");
+    assert_snapshot!(normalized, @r"");
+}
+
+#[test]
+fn long_temporal_literals_overflow_produce_warnings() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        PROGRAM prg
+        VAR
+            ltime_overflow : LTIME := LTIME#3000000d;
+            ldate_overflow : LDATE := LDATE#2300-12-31;
+            ldt_overflow : LDT := LDT#2300-12-31-00:00:00;
+            ltod_overflow : LTOD := LTOD#24:59:59;
+        END_VAR
+        END_PROGRAM
+       "#,
+    );
+
+    let normalized = diagnostics.lines().map(str::trim_start).collect::<Vec<_>>().join("\n");
+    assert_snapshot!(normalized, @"
+    warning[E148]: LTIME literal overflow detected
+    ┌─ <internal>:4:39
+    │
+    4 │             ltime_overflow : LTIME := LTIME#3000000d;
+    │                                       ^^^^^^^^^^^^^^ LTIME literal overflow detected
+
+    warning[E148]: LDATE literal out-of-range detected
+    ┌─ <internal>:5:39
+    │
+    5 │             ldate_overflow : LDATE := LDATE#2300-12-31;
+    │                                       ^^^^^^^^^^^^^^^^ LDATE literal out-of-range detected
+
+    warning[E148]: LDATE_AND_TIME literal out-of-range detected
+    ┌─ <internal>:6:35
+    │
+    6 │             ldt_overflow : LDT := LDT#2300-12-31-00:00:00;
+    │                                   ^^^^^^^^^^^^^^^^^^^^^^^ LDATE_AND_TIME literal out-of-range detected
+
+    warning[E148]: LTIME_OF_DAY literal out-of-range detected
+    ┌─ <internal>:7:37
+    │
+    7 │             ltod_overflow : LTOD := LTOD#24:59:59;
+    │                                     ^^^^^^^^^^^^^ LTIME_OF_DAY literal out-of-range detected
+    ");
 }

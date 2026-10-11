@@ -544,6 +544,8 @@ fn function_output_should_be_cast_if_needed() {
       %result = alloca ptr, align [filtered]
       store ptr %2, ptr %result, align [filtered]
       store i16 0, ptr %libFunction, align [filtered]
+      %3 = load ptr, ptr %result, align [filtered]
+      store float 0.000000e+00, ptr %3, align [filtered]
       %libFunction_ret = load i16, ptr %libFunction, align [filtered]
       ret i16 %libFunction_ret
     }
@@ -552,13 +554,23 @@ fn function_output_should_be_cast_if_needed() {
     entry:
       %i1 = getelementptr inbounds nuw %mainProg, ptr %0, i32 0, i32 0
       %__libFunction_result0 = alloca float, align [filtered]
+      call void @llvm.lifetime.start.p0(i64 -1, ptr %__libFunction_result0)
       store float 0.000000e+00, ptr %__libFunction_result0, align [filtered]
       %call = call i16 @libFunction(i16 0, float 0.000000e+00, ptr %__libFunction_result0)
       %load___libFunction_result0 = load float, ptr %__libFunction_result0, align [filtered]
       %1 = fptosi float %load___libFunction_result0 to i16
       store i16 %1, ptr %i1, align [filtered]
+      call void @llvm.lifetime.end.p0(i64 -1, ptr %__libFunction_result0)
       ret void
     }
+
+    ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
+    declare void @llvm.lifetime.start.p0(i64 immarg, ptr captures(none)) #0
+
+    ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
+    declare void @llvm.lifetime.end.p0(i64 immarg, ptr captures(none)) #0
+
+    attributes #0 = { nocallback nofree nosync nounwind willreturn memory(argmem: readwrite) }
     "#)
 }
 

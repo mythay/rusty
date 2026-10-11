@@ -158,7 +158,7 @@ fn constant_on_illegal_var_blocks_cause_validation_issue() {
         END_VAR
 
         PROGRAM prg
-            VAR_INPUT CONSTANT //illegal
+            VAR_INPUT CONSTANT //accepted, no effect
             END_VAR
 
             VAR_OUTPUT CONSTANT //illegal
@@ -177,7 +177,7 @@ fn constant_on_illegal_var_blocks_cause_validation_issue() {
             END_VAR
 
              METHOD testMethod
-                VAR_INPUT CONSTANT //illegal
+                VAR_INPUT CONSTANT //accepted, no effect
                 END_VAR
 
                 VAR_OUTPUT CONSTANT //illegal
@@ -193,7 +193,7 @@ fn constant_on_illegal_var_blocks_cause_validation_issue() {
        ",
     );
 
-    // THEN everything but VAR and VAR_GLOBALS are reported
+    // THEN everything but VAR, VAR_GLOBAL and VAR_INPUT is reported
     assert_snapshot!(&diagnostics);
 }
 
@@ -471,13 +471,10 @@ fn assignment_suggestion_for_equal_operation_with_no_effect() {
                 condition   : BOOL;
 
                 // These Should work
-                arr_dint : ARRAY[0..5] OF DINT := [1 = 1, 2, 3, 4, 5 = 5];
                 arr_bool : ARRAY[1..5] OF BOOL := [1 = 1, 2 = 2, 3 = 3, 4 = 4, 5 = 10];
             END_VAR
 
             // These should work
-            value := (condition = TRUE);
-
             IF   condition = TRUE   THEN (* ... *) END_IF
             IF  (condition = TRUE)  THEN (* ... *) END_IF
             IF ((condition = TRUE)) THEN (* ... *) END_IF
@@ -576,7 +573,13 @@ fn invalid_initial_constant_values_in_pou_variables() {
         "#,
     );
 
-    assert_snapshot!(diagnostics, @r"
+    assert_snapshot!(diagnostics, @"
+    warning[E067]: Implicit downcast from 'DINT' to 'INT'.
+       ┌─ <internal>:10:28
+       │
+    10 │             my_len: INT := LEN + 4;  //cannot be evaluated at compile time!
+       │                            ^^^ Implicit downcast from 'DINT' to 'INT'.
+
     error[E033]: Unresolved constant `my_len` variable: `LEN` is no const reference
        ┌─ <internal>:10:28
        │
@@ -899,7 +902,7 @@ fn unresolved_references_to_const_builtins_in_initializer_are_reported() {
         "#,
     );
 
-    assert_snapshot!(diagnostics, @r"
+    assert_snapshot!(diagnostics, @"
     error[E048]: Could not resolve reference to gb
       ┌─ <internal>:4:42
       │
@@ -998,7 +1001,7 @@ fn trying_to_initialize_a_pointer_of_unknown_type_is_reported() {
 }
 
 #[test]
-fn trying_to_initialize_a_pointer_with_builtin_ref_with_type_mismatch_leads_to_error() {
+fn trying_to_initialize_a_pointer_with_builtin_ref_with_type_mismatch_leads_to_warning() {
     let diagnostics = parse_and_validate_buffered(
         r#"
         VAR_GLOBAL
@@ -1012,12 +1015,12 @@ fn trying_to_initialize_a_pointer_with_builtin_ref_with_type_mismatch_leads_to_e
         "#,
     );
 
-    assert_snapshot!(diagnostics, @r"
-    error[E037]: Invalid assignment: cannot assign 'DINT' to 'REF_TO STRING := REF(a)'
+    assert_snapshot!(diagnostics, @"
+    warning[E090]: Pointers REF_TO STRING and DINT have different types
       ┌─ <internal>:7:36
       │
     7 │             bar : REF_TO STRING := REF(a);
-      │                                    ^^^^^^ Invalid assignment: cannot assign 'DINT' to 'REF_TO STRING := REF(a)'
+      │                                    ^^^^^^ Pointers REF_TO STRING and DINT have different types
     ");
 }
 
@@ -1602,7 +1605,7 @@ fn output_variables_must_be_assignable_within_the_scope_of_inheritance() {
             END_VAR
 
             out1 := 1;
-            out2 := 2;
+            out2 := TRUE;
         END_FUNCTION_BLOCK
 
         PROGRAM mainProg
@@ -1615,6 +1618,142 @@ fn output_variables_must_be_assignable_within_the_scope_of_inheritance() {
             fb2();
         END_PROGRAM
        ",
+    );
+
+    assert_snapshot!(&diagnostics, @"");
+}
+
+#[test]
+fn in_out_variables_must_not_be_accessible_outside_of_their_scope() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION_BLOCK FB_Sample
+            VAR_IN_OUT
+                Velocity : LREAL;
+            END_VAR
+        END_FUNCTION_BLOCK
+
+        FUNCTION takeIt : DINT
+            VAR_INPUT
+                value : LREAL;
+            END_VAR
+        END_FUNCTION
+
+        PROGRAM prog
+            VAR_IN_OUT
+                progInOut : LREAL;
+            END_VAR
+        END_PROGRAM
+
+        PROGRAM mainProg
+            VAR
+                myVel : LREAL;
+                fbSample : FB_Sample;
+                pVel : POINTER TO LREAL;
+            END_VAR
+
+            fbSample.Velocity := myVel;
+            myVel := fbSample.Velocity;
+            myVel := fbSample.Velocity + 1.0;
+            takeIt(fbSample.Velocity);
+            takeIt(value := fbSample.Velocity);
+            pVel := ADR(fbSample.Velocity);
+            prog.progInOut := myVel;
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @r"
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:27:13
+       │
+    27 │             fbSample.Velocity := myVel;
+       │             ^^^^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:28:22
+       │
+    28 │             myVel := fbSample.Velocity;
+       │                      ^^^^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:29:22
+       │
+    29 │             myVel := fbSample.Velocity + 1.0;
+       │                      ^^^^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:30:20
+       │
+    30 │             takeIt(fbSample.Velocity);
+       │                    ^^^^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:31:29
+       │
+    31 │             takeIt(value := fbSample.Velocity);
+       │                             ^^^^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:32:25
+       │
+    32 │             pVel := ADR(fbSample.Velocity);
+       │                         ^^^^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+
+    error[E037]: VAR_IN_OUT variables cannot be accessed outside of their scope.
+       ┌─ <internal>:33:13
+       │
+    33 │             prog.progInOut := myVel;
+       │             ^^^^^^^^^^^^^^ VAR_IN_OUT variables cannot be accessed outside of their scope.
+    ");
+}
+
+#[test]
+fn in_out_variables_are_accessible_within_their_scope() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION_BLOCK FB_Other
+            VAR_IN_OUT
+                otherInOut : LREAL;
+            END_VAR
+        END_FUNCTION_BLOCK
+
+        FUNCTION_BLOCK FB_Sample
+            VAR_IN_OUT
+                Velocity : LREAL;
+            END_VAR
+            VAR
+                innerFb : FB_Other;
+            END_VAR
+
+            METHOD someMethod
+                Velocity := 3.0;
+            END_METHOD
+
+            Velocity := Velocity + 1.0;
+            THIS^.Velocity := 2.0;
+            innerFb(otherInOut := Velocity);
+        END_FUNCTION_BLOCK
+
+        ACTIONS FB_Sample
+            ACTION someAction
+                Velocity := 4.0;
+            END_ACTION
+        END_ACTIONS
+
+        FUNCTION_BLOCK FB_Child EXTENDS FB_Sample
+            Velocity := 5.0;
+        END_FUNCTION_BLOCK
+
+        PROGRAM mainProg
+            VAR
+                myVel : LREAL;
+                fbSample : FB_Sample;
+            END_VAR
+
+            fbSample(Velocity := myVel);
+        END_PROGRAM
+        "#,
     );
 
     assert_snapshot!(&diagnostics, @"");
@@ -1687,6 +1826,12 @@ fn function_output_with_mismatched_type_assignment_must_produce_a_friendly_error
     );
 
     assert_snapshot!(&diagnostics, @"
+    error[E037]: Parameter result is passed by reference, it requires an argument of type REAL but got INT
+       ┌─ <internal>:20:27
+       │
+    20 │                 result => i1
+       │                           ^^ Parameter result is passed by reference, it requires an argument of type REAL but got INT
+
     warning[E067]: Implicit downcast from 'REAL' to 'INT'.
        ┌─ <internal>:20:17
        │
@@ -1874,4 +2019,175 @@ fn fb_var_temp_visible_inside_fb_body_and_actions() {
     );
 
     assert!(diagnostics.is_empty(), "expected clean diagnostics, got:\n{diagnostics}");
+}
+
+#[test]
+fn typed_literal_initializers_are_validated_against_the_cast_type() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        PROGRAM mainProg
+        VAR
+            dintFromBool : DINT := DINT#TRUE;
+            dintFromReal : DINT := DINT#1.5;
+            realFromBool : REAL := REAL#TRUE;
+            boolFromInt : BOOL := BOOL#5;
+            validDint : DINT := DINT#5;
+            validReal : REAL := REAL#1.5;
+            validBool : BOOL := BOOL#TRUE;
+            validBoolFromInt : BOOL := BOOL#1;
+        END_VAR
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(diagnostics, @r#"
+    warning[E039]: This will overflow for type BOOL
+      ┌─ <internal>:7:40
+      │
+    7 │             boolFromInt : BOOL := BOOL#5;
+      │                                        ^ This will overflow for type BOOL
+
+    error[E054]: Literal true is not compatible to DINT
+      ┌─ <internal>:4:36
+      │
+    4 │             dintFromBool : DINT := DINT#TRUE;
+      │                                    ^^^^^^^^^ Literal true is not compatible to DINT
+
+    error[E033]: Unresolved constant `dintFromBool` variable: Expected integer value, found LiteralBool { value: true }
+      ┌─ <internal>:4:36
+      │
+    4 │             dintFromBool : DINT := DINT#TRUE;
+      │                                    ^^^^^^^^^ Unresolved constant `dintFromBool` variable: Expected integer value, found LiteralBool { value: true }
+
+    error[E054]: Literal 1.5 is not compatible to DINT
+      ┌─ <internal>:5:36
+      │
+    5 │             dintFromReal : DINT := DINT#1.5;
+      │                                    ^^^^^^^^ Literal 1.5 is not compatible to DINT
+
+    error[E033]: Unresolved constant `dintFromReal` variable: Expected integer value, found LiteralReal { value: "1.5" }
+      ┌─ <internal>:5:36
+      │
+    5 │             dintFromReal : DINT := DINT#1.5;
+      │                                    ^^^^^^^^ Unresolved constant `dintFromReal` variable: Expected integer value, found LiteralReal { value: "1.5" }
+
+    error[E054]: Literal true is not compatible to REAL
+      ┌─ <internal>:6:36
+      │
+    6 │             realFromBool : REAL := REAL#TRUE;
+      │                                    ^^^^^^^^^ Literal true is not compatible to REAL
+
+    error[E033]: Unresolved constant `realFromBool` variable: Expected floating point type, got: Some(LiteralBool { value: true })
+      ┌─ <internal>:6:36
+      │
+    6 │             realFromBool : REAL := REAL#TRUE;
+      │                                    ^^^^^^^^^ Unresolved constant `realFromBool` variable: Expected floating point type, got: Some(LiteralBool { value: true })
+
+    error[E053]: Literal 5 out of range (BOOL)
+      ┌─ <internal>:7:35
+      │
+    7 │             boolFromInt : BOOL := BOOL#5;
+      │                                   ^^^^^^ Literal 5 out of range (BOOL)
+    "#);
+}
+
+#[test]
+fn initializers_with_incompatible_types_are_reported() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        TYPE MyStruct : STRUCT
+            member : STRING := 3;
+        END_STRUCT END_TYPE
+
+        VAR_GLOBAL
+            gInt : DINT := 'abc';
+        END_VAR
+
+        FUNCTION_BLOCK MyFb
+        VAR
+            fbStr : WSTRING := 3;
+        END_VAR
+        END_FUNCTION_BLOCK
+
+        PROGRAM mainProg
+        VAR
+            str : STRING := 3;
+            strFromReal : STRING := 3.5;
+            strFromBool : STRING := TRUE;
+            int : INT := 'abc';
+            dintFromBool : DINT := TRUE;
+            boolFromInt : BOOL := 5;
+            validStr : STRING := 'abc';
+            validBool : BOOL := 1;
+            validInt : DINT := 3;
+            validReal : LREAL := 3;
+            validStruct : MyStruct := (member := 'abc');
+            validArray : ARRAY[0..1] OF DINT := [1, 2];
+            validFb : MyFb;
+        END_VAR
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(diagnostics, @"
+    warning[E039]: This will overflow for type BOOL
+       ┌─ <internal>:23:35
+       │
+    23 │             boolFromInt : BOOL := 5;
+       │                                   ^ This will overflow for type BOOL
+
+    error[E037]: Invalid assignment: cannot assign 'DINT' to 'WSTRING'
+       ┌─ <internal>:12:32
+       │
+    12 │             fbStr : WSTRING := 3;
+       │                                ^ Invalid assignment: cannot assign 'DINT' to 'WSTRING'
+
+    error[E037]: Invalid assignment: cannot assign 'DINT' to 'STRING'
+       ┌─ <internal>:18:29
+       │
+    18 │             str : STRING := 3;
+       │                             ^ Invalid assignment: cannot assign 'DINT' to 'STRING'
+
+    error[E037]: Invalid assignment: cannot assign 'REAL' to 'STRING'
+       ┌─ <internal>:19:37
+       │
+    19 │             strFromReal : STRING := 3.5;
+       │                                     ^^^ Invalid assignment: cannot assign 'REAL' to 'STRING'
+
+    error[E037]: Invalid assignment: cannot assign 'BOOL' to 'STRING'
+       ┌─ <internal>:20:37
+       │
+    20 │             strFromBool : STRING := TRUE;
+       │                                     ^^^^ Invalid assignment: cannot assign 'BOOL' to 'STRING'
+
+    error[E037]: Invalid assignment: cannot assign 'STRING' to 'INT'
+       ┌─ <internal>:21:26
+       │
+    21 │             int : INT := 'abc';
+       │                          ^^^^^ Invalid assignment: cannot assign 'STRING' to 'INT'
+
+    error[E037]: Invalid assignment: cannot assign 'BOOL' to 'DINT'
+       ┌─ <internal>:22:36
+       │
+    22 │             dintFromBool : DINT := TRUE;
+       │                                    ^^^^ Invalid assignment: cannot assign 'BOOL' to 'DINT'
+
+    error[E037]: Invalid assignment: cannot assign 'DINT' to 'BOOL'
+       ┌─ <internal>:23:35
+       │
+    23 │             boolFromInt : BOOL := 5;
+       │                                   ^ Invalid assignment: cannot assign 'DINT' to 'BOOL'
+
+    error[E037]: Invalid assignment: cannot assign 'DINT' to 'STRING'
+      ┌─ <internal>:3:32
+      │
+    3 │             member : STRING := 3;
+      │                                ^ Invalid assignment: cannot assign 'DINT' to 'STRING'
+
+    error[E037]: Invalid assignment: cannot assign 'STRING' to 'DINT'
+      ┌─ <internal>:7:28
+      │
+    7 │             gInt : DINT := 'abc';
+      │                            ^^^^^ Invalid assignment: cannot assign 'STRING' to 'DINT'
+    ");
 }

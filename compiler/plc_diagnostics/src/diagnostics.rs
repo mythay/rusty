@@ -380,11 +380,179 @@ impl Diagnostic {
     {
         Diagnostic::new("Unnamed control").with_error_code("E087").with_location(location)
     }
+
+    pub fn unsupported_cfc_expression<T>(expression: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Unsupported CFC expression: `{expression}`"))
+            .with_error_code("E083")
+            .with_location(location)
+    }
+
+    pub fn unconnected_element<T>(name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Element `{name}` is unconnected and will be ignored"))
+            .with_error_code("E084")
+            .with_location(location)
+    }
+
+    pub fn disconnected_return<T>(location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new("Return element is not connected to a condition")
+            .with_error_code("E085")
+            .with_location(location)
+    }
+
+    pub fn duplicate_connector<T>(label: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Connector `{label}` is already defined"))
+            .with_error_code("E081")
+            .with_location(location)
+    }
+
+    pub fn dangling_continuation<T>(label: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Continuation `{label}` has no matching connector"))
+            .with_error_code("E082")
+            .with_location(location)
+    }
+
+    pub fn open_connector<T>(label: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Connector `{label}` has no incoming connection"))
+            .with_error_code("E086")
+            .with_location(location)
+    }
+
+    pub fn undefined_jump_target<T>(label: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Jump refers to undefined label `{label}`"))
+            .with_error_code("E142")
+            .with_location(location)
+    }
+
+    pub fn unused_label<T>(label: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Label `{label}` is not referenced by any jump"))
+            .with_error_code("E143")
+            .with_location(location)
+    }
+
+    pub fn duplicate_label<T>(label: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Label `{label}` is already defined"))
+            .with_error_code("E144")
+            .with_location(location)
+    }
+
+    pub fn unknown_block_type<T>(name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Block `{name}` refers to an undeclared POU"))
+            .with_error_code("E146")
+            .with_location(location)
+    }
+
+    pub fn undeclared_block_output<T>(output: &str, name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Output `{output}` is not declared by `{name}`"))
+            .with_error_code("E147")
+            .with_location(location)
+    }
+
+    pub fn unconnected_en<T>(name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Block `{name}` has an unconnected EN pin"))
+            .with_error_code("E152")
+            .with_location(location)
+    }
+
+    pub fn eno_cycle<T>(name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("EN pin of block `{name}` resolves through an ENO cycle"))
+            .with_error_code("E153")
+            .with_location(location)
+    }
+
+    pub fn negated_reference_assignment<T>(name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Reference assignment to `{name}` cannot be negated"))
+            .with_error_code("E154")
+            .with_location(location)
+    }
+
+    pub fn duplicate_return_pin<T>(name: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!("Block `{name}` has more than one return pin"))
+            .with_error_code("E155")
+            .with_location(location)
+    }
+
+    pub fn disconnected_jump<T>(location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new("Jump element is not connected to a condition and can never be taken")
+            .with_error_code("E145")
+            .with_location(location)
+    }
+
+    pub fn unresolved_generic_output<T>(block: &str, location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(format!(
+            "Cannot determine a type for generic block `{block}`: no input decides its type"
+        ))
+        .with_error_code("E149")
+        .with_location(location)
+    }
+
+    pub fn invalid_execution_order<T>(location: T) -> Diagnostic
+    where
+        T: Into<SourceLocation>,
+    {
+        Diagnostic::new(
+            "Element has an execution order of 0, which is invalid; execution orders start at 1, the project may be corrupted",
+        )
+        .with_error_code("E158")
+        .with_location(location)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use codespan_reporting::files::{Location, SimpleFile};
+
+    use plc_source::source_location::CodeSpan;
 
     use crate::{diagnostics::Severity, reporter::clang::ClangFormatDiagnosticReporter};
 
@@ -398,6 +566,7 @@ mod tests {
             Some(&file),
             Some(&start),
             Some(&end),
+            &CodeSpan::None,
             "E001",
             &Severity::Error,
             "This is an error",
@@ -416,6 +585,7 @@ mod tests {
             Some(&file),
             Some(&start),
             Some(&end),
+            &CodeSpan::None,
             "E001",
             &Severity::Error,
             "This is an error",
@@ -432,6 +602,7 @@ mod tests {
             Some(&file),
             None,
             None,
+            &CodeSpan::None,
             "E001",
             &Severity::Error,
             "This is an error",
@@ -449,6 +620,7 @@ mod tests {
             None,
             Some(&start),
             Some(&end),
+            &CodeSpan::None,
             "E001",
             &Severity::Error,
             "This is an error",
@@ -460,8 +632,15 @@ mod tests {
     #[test]
     fn test_build_diagnostic_msg_no_file_no_location() {
         let reporter = ClangFormatDiagnosticReporter::default();
-        let res =
-            reporter.build_diagnostic_msg(None, None, None, "E001", &Severity::Error, "This is an error");
+        let res = reporter.build_diagnostic_msg(
+            None,
+            None,
+            None,
+            &CodeSpan::None,
+            "E001",
+            &Severity::Error,
+            "This is an error",
+        );
 
         assert_eq!(res, "error[E001]: This is an error");
     }

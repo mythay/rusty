@@ -994,8 +994,9 @@ fn nested_loop_temporaries_are_allocated_in_entry_block() {
         .join("\n");
 
     // Nested FOR loops become nested WHILE TRUE loops once desugared, with temporary alloca locals like
-    // `ran_once_*` and `is_incrementing_*`. If their `alloca`s stay in the loop body, the inner temporaries
-    // are reallocated on each iteration. Codegen must hoist those stack allocations to the entry block.
+    // `__ran_once_*` and `__is_incrementing_*`. If their `alloca`s stay in the loop body, the inner
+    // temporaries are reallocated on each iteration. Codegen must hoist those stack allocations to the
+    // entry block.
     filtered_assert_snapshot!(result, @r#"
     ; ModuleID = '<internal>'
     source_filename = "<internal>"
@@ -1010,19 +1011,19 @@ fn nested_loop_temporaries_are_allocated_in_entry_block() {
       store i32 0, ptr %i, align [filtered]
       store i32 0, ptr %j, align [filtered]
       store i32 0, ptr %main, align [filtered]
-      %ran_once_1 = alloca i8, align [filtered]
-      store i8 0, ptr %ran_once_1, align [filtered]
-      %is_incrementing_1 = alloca i8, align [filtered]
-      store i8 0, ptr %is_incrementing_1, align [filtered]
+      %__ran_once_1 = alloca i8, align [filtered]
+      store i8 0, ptr %__ran_once_1, align [filtered]
+      %__is_incrementing_1 = alloca i8, align [filtered]
+      store i8 0, ptr %__is_incrementing_1, align [filtered]
       store i32 1, ptr %i, align [filtered]
-      store i8 1, ptr %is_incrementing_1, align [filtered]
-      %ran_once_0 = alloca i8, align [filtered]
-      %is_incrementing_0 = alloca i8, align [filtered]
+      store i8 1, ptr %__is_incrementing_1, align [filtered]
+      %__ran_once_0 = alloca i8, align [filtered]
+      %__is_incrementing_0 = alloca i8, align [filtered]
       br label %while_body
 
     while_body:                                       ; preds = %continue14, %entry
-      %load_ran_once_1 = load i8, ptr %ran_once_1, align [filtered]
-      %0 = icmp ne i8 %load_ran_once_1, 0
+      %load___ran_once_1 = load i8, ptr %__ran_once_1, align [filtered]
+      %0 = icmp ne i8 %load___ran_once_1, 0
       br i1 %0, label %condition_body, label %continue1
 
     continue:                                         ; preds = %condition_body11, %condition_body7
@@ -1036,9 +1037,9 @@ fn nested_loop_temporaries_are_allocated_in_entry_block() {
       br label %continue1
 
     continue1:                                        ; preds = %condition_body, %while_body
-      store i8 1, ptr %ran_once_1, align [filtered]
-      %load_is_incrementing_1 = load i8, ptr %is_incrementing_1, align [filtered]
-      %1 = icmp ne i8 %load_is_incrementing_1, 0
+      store i8 1, ptr %__ran_once_1, align [filtered]
+      %load___is_incrementing_1 = load i8, ptr %__is_incrementing_1, align [filtered]
+      %1 = icmp ne i8 %load___is_incrementing_1, 0
       br i1 %1, label %condition_body3, label %else
 
     condition_body3:                                  ; preds = %continue1
@@ -1056,10 +1057,10 @@ fn nested_loop_temporaries_are_allocated_in_entry_block() {
       br i1 %5, label %condition_body11, label %continue8
 
     continue2:                                        ; preds = %continue8, %continue4
-      store i8 0, ptr %ran_once_0, align [filtered]
-      store i8 0, ptr %is_incrementing_0, align [filtered]
+      store i8 0, ptr %__ran_once_0, align [filtered]
+      store i8 0, ptr %__is_incrementing_0, align [filtered]
       store i32 1, ptr %j, align [filtered]
-      store i8 1, ptr %is_incrementing_0, align [filtered]
+      store i8 1, ptr %__is_incrementing_0, align [filtered]
       br label %while_body13
 
     condition_body7:                                  ; preds = %condition_body3
@@ -1081,8 +1082,8 @@ fn nested_loop_temporaries_are_allocated_in_entry_block() {
       br label %continue2
 
     while_body13:                                     ; preds = %continue19, %continue2
-      %load_ran_once_0 = load i8, ptr %ran_once_0, align [filtered]
-      %6 = icmp ne i8 %load_ran_once_0, 0
+      %load___ran_once_0 = load i8, ptr %__ran_once_0, align [filtered]
+      %6 = icmp ne i8 %load___ran_once_0, 0
       br i1 %6, label %condition_body16, label %continue15
 
     continue14:                                       ; preds = %condition_body29, %condition_body24
@@ -1095,9 +1096,9 @@ fn nested_loop_temporaries_are_allocated_in_entry_block() {
       br label %continue15
 
     continue15:                                       ; preds = %condition_body16, %while_body13
-      store i8 1, ptr %ran_once_0, align [filtered]
-      %load_is_incrementing_0 = load i8, ptr %is_incrementing_0, align [filtered]
-      %7 = icmp ne i8 %load_is_incrementing_0, 0
+      store i8 1, ptr %__ran_once_0, align [filtered]
+      %load___is_incrementing_0 = load i8, ptr %__is_incrementing_0, align [filtered]
+      %7 = icmp ne i8 %load___is_incrementing_0, 0
       br i1 %7, label %condition_body20, label %else18
 
     condition_body20:                                 ; preds = %continue15
@@ -1877,10 +1878,10 @@ fn for_statement_with_binary_expressions() {
       %x = getelementptr inbounds nuw %prg, ptr %0, i32 0, i32 1
       %y = getelementptr inbounds nuw %prg, ptr %0, i32 0, i32 2
       %z = getelementptr inbounds nuw %prg, ptr %0, i32 0, i32 3
-      %ran_once_0 = alloca i8, align [filtered]
-      store i8 0, ptr %ran_once_0, align [filtered]
-      %is_incrementing_0 = alloca i8, align [filtered]
-      store i8 0, ptr %is_incrementing_0, align [filtered]
+      %__ran_once_0 = alloca i8, align [filtered]
+      store i8 0, ptr %__ran_once_0, align [filtered]
+      %__is_incrementing_0 = alloca i8, align [filtered]
+      store i8 0, ptr %__is_incrementing_0, align [filtered]
       %load_y = load i32, ptr %y, align [filtered]
       %tmpVar = add i32 %load_y, 1
       store i32 %tmpVar, ptr %x, align [filtered]
@@ -1888,12 +1889,12 @@ fn for_statement_with_binary_expressions() {
       %tmpVar1 = mul i32 %load_step, 3
       %tmpVar2 = icmp sgt i32 %tmpVar1, 0
       %1 = zext i1 %tmpVar2 to i8
-      store i8 %1, ptr %is_incrementing_0, align [filtered]
+      store i8 %1, ptr %__is_incrementing_0, align [filtered]
       br label %while_body
 
     while_body:                                       ; preds = %continue7, %entry
-      %load_ran_once_0 = load i8, ptr %ran_once_0, align [filtered]
-      %2 = icmp ne i8 %load_ran_once_0, 0
+      %load___ran_once_0 = load i8, ptr %__ran_once_0, align [filtered]
+      %2 = icmp ne i8 %load___ran_once_0, 0
       br i1 %2, label %condition_body, label %continue3
 
     continue:                                         ; preds = %condition_body19, %condition_body13
@@ -1908,9 +1909,9 @@ fn for_statement_with_binary_expressions() {
       br label %continue3
 
     continue3:                                        ; preds = %condition_body, %while_body
-      store i8 1, ptr %ran_once_0, align [filtered]
-      %load_is_incrementing_0 = load i8, ptr %is_incrementing_0, align [filtered]
-      %3 = icmp ne i8 %load_is_incrementing_0, 0
+      store i8 1, ptr %__ran_once_0, align [filtered]
+      %load___is_incrementing_0 = load i8, ptr %__is_incrementing_0, align [filtered]
+      %3 = icmp ne i8 %load___is_incrementing_0, 0
       br i1 %3, label %condition_body8, label %else
 
     condition_body8:                                  ; preds = %continue3
@@ -1981,21 +1982,21 @@ fn for_statement_type_casting() {
       %b = alloca i16, align [filtered]
       store i8 0, ptr %a, align [filtered]
       store i16 1, ptr %b, align [filtered]
-      %ran_once_0 = alloca i8, align [filtered]
-      store i8 0, ptr %ran_once_0, align [filtered]
-      %is_incrementing_0 = alloca i8, align [filtered]
-      store i8 0, ptr %is_incrementing_0, align [filtered]
+      %__ran_once_0 = alloca i8, align [filtered]
+      store i8 0, ptr %__ran_once_0, align [filtered]
+      %__is_incrementing_0 = alloca i8, align [filtered]
+      store i8 0, ptr %__is_incrementing_0, align [filtered]
       store i8 0, ptr %a, align [filtered]
       %load_b = load i16, ptr %b, align [filtered]
       %0 = sext i16 %load_b to i32
       %tmpVar = icmp sgt i32 %0, 0
       %1 = zext i1 %tmpVar to i8
-      store i8 %1, ptr %is_incrementing_0, align [filtered]
+      store i8 %1, ptr %__is_incrementing_0, align [filtered]
       br label %while_body
 
     while_body:                                       ; preds = %continue4, %entry
-      %load_ran_once_0 = load i8, ptr %ran_once_0, align [filtered]
-      %2 = icmp ne i8 %load_ran_once_0, 0
+      %load___ran_once_0 = load i8, ptr %__ran_once_0, align [filtered]
+      %2 = icmp ne i8 %load___ran_once_0, 0
       br i1 %2, label %condition_body, label %continue1
 
     continue:                                         ; preds = %condition_body13, %condition_body9
@@ -2012,9 +2013,9 @@ fn for_statement_type_casting() {
       br label %continue1
 
     continue1:                                        ; preds = %condition_body, %while_body
-      store i8 1, ptr %ran_once_0, align [filtered]
-      %load_is_incrementing_0 = load i8, ptr %is_incrementing_0, align [filtered]
-      %6 = icmp ne i8 %load_is_incrementing_0, 0
+      store i8 1, ptr %__ran_once_0, align [filtered]
+      %load___is_incrementing_0 = load i8, ptr %__is_incrementing_0, align [filtered]
+      %6 = icmp ne i8 %load___is_incrementing_0, 0
       br i1 %6, label %condition_body5, label %else
 
     condition_body5:                                  ; preds = %continue1
@@ -4823,5 +4824,41 @@ fn function_block_with_var_temp_should_compile_when_implicit_output_is_specified
     declare void @llvm.memset.p0.i64(ptr writeonly captures(none), i8, i64, i1 immarg) #0
 
     attributes #0 = { nocallback nofree nounwind willreturn memory(argmem: write) }
+    "#);
+}
+
+#[test]
+fn var_input_constant_has_no_effect_on_codegen() {
+    // the input must be read from the passed argument, not folded to its default value
+    let result = codegen(
+        r#"
+        FUNCTION foo : INT
+        VAR_INPUT CONSTANT
+            x : INT := 3;
+        END_VAR
+            foo := x + 1;
+        END_FUNCTION
+        "#,
+    );
+    filtered_assert_snapshot!(result, @r#"
+    ; ModuleID = '<internal>'
+    source_filename = "<internal>"
+    target datalayout = "[filtered]"
+    target triple = "[filtered]"
+
+    define i16 @foo(i16 %0) {
+    entry:
+      %foo = alloca i16, align [filtered]
+      %x = alloca i16, align [filtered]
+      store i16 %0, ptr %x, align [filtered]
+      store i16 0, ptr %foo, align [filtered]
+      %load_x = load i16, ptr %x, align [filtered]
+      %1 = sext i16 %load_x to i32
+      %tmpVar = add i32 %1, 1
+      %2 = trunc i32 %tmpVar to i16
+      store i16 %2, ptr %foo, align [filtered]
+      %foo_ret = load i16, ptr %foo, align [filtered]
+      ret i16 %foo_ret
+    }
     "#);
 }

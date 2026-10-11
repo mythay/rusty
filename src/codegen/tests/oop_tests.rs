@@ -739,7 +739,38 @@ fn array_in_parent_generated() {
     entry:
       %self = alloca ptr, align [filtered]
       store ptr %0, ptr %self, align [filtered]
+      %__main_arr__idx0 = alloca i32, align [filtered]
+      store i32 0, ptr %__main_arr__idx0, align [filtered]
+      store i32 0, ptr %__main_arr__idx0, align [filtered]
+      br label %while_body
+
+    while_body:                                       ; preds = %continue1, %entry
+      %load___main_arr__idx0 = load i32, ptr %__main_arr__idx0, align [filtered]
+      %tmpVar = icmp sgt i32 %load___main_arr__idx0, 10
+      %1 = zext i1 %tmpVar to i8
+      %2 = icmp ne i8 %1, 0
+      br i1 %2, label %condition_body, label %continue1
+
+    continue:                                         ; preds = %condition_body
       ret void
+
+    condition_body:                                   ; preds = %while_body
+      br label %continue
+
+    buffer_block:                                     ; No predecessors!
+      br label %continue1
+
+    continue1:                                        ; preds = %buffer_block, %while_body
+      %deref = load ptr, ptr %self, align [filtered]
+      %load___main_arr__idx02 = load i32, ptr %__main_arr__idx0, align [filtered]
+      %tmpVar3 = mul i32 1, %load___main_arr__idx02
+      %tmpVar4 = add i32 %tmpVar3, 0
+      %tmpVar5 = getelementptr inbounds [11 x %child], ptr %deref, i32 0, i32 %tmpVar4
+      call void @child__ctor(ptr %tmpVar5)
+      %load___main_arr__idx06 = load i32, ptr %__main_arr__idx0, align [filtered]
+      %tmpVar7 = add i32 %load___main_arr__idx06, 1
+      store i32 %tmpVar7, ptr %__main_arr__idx0, align [filtered]
+      br label %while_body
     }
 
     define void @__vtable_grandparent__ctor(ptr %0) {
@@ -2493,6 +2524,8 @@ fn fb_extension_with_output() {
       %outputValue = alloca ptr, align [filtered]
       store ptr %3, ptr %outputValue, align [filtered]
       store i16 0, ptr %foo.met1, align [filtered]
+      %4 = load ptr, ptr %outputValue, align [filtered]
+      store i16 0, ptr %4, align [filtered]
       %foo__met1_ret = load i16, ptr %foo.met1, align [filtered]
       ret i16 %foo__met1_ret
     }
@@ -2510,6 +2543,7 @@ fn fb_extension_with_output() {
       %1 = load ptr, ptr %met1, align [filtered]
       %deref3 = load ptr, ptr %this, align [filtered]
       %2 = alloca i16, align [filtered]
+      store i16 0, ptr %2, align [filtered]
       %fnptr_call = call i16 %1(ptr %deref3, i16 0, i16 0, ptr %2)
       ret void
     }
@@ -2695,14 +2729,16 @@ fn function_with_output_used_in_main_by_extension() {
       %outputValue = alloca ptr, align [filtered]
       store ptr %3, ptr %outputValue, align [filtered]
       store i16 0, ptr %foo.met1, align [filtered]
+      %4 = load ptr, ptr %outputValue, align [filtered]
+      store i16 0, ptr %4, align [filtered]
       %deref = load ptr, ptr %outputValue, align [filtered]
       %load_mandatoryInput = load i16, ptr %mandatoryInput, align [filtered]
-      %4 = sext i16 %load_mandatoryInput to i32
+      %5 = sext i16 %load_mandatoryInput to i32
       %load_optionalInput = load i16, ptr %optionalInput, align [filtered]
-      %5 = sext i16 %load_optionalInput to i32
-      %tmpVar = add i32 %4, %5
-      %6 = trunc i32 %tmpVar to i16
-      store i16 %6, ptr %deref, align [filtered]
+      %6 = sext i16 %load_optionalInput to i32
+      %tmpVar = add i32 %5, %6
+      %7 = trunc i32 %tmpVar to i16
+      store i16 %7, ptr %deref, align [filtered]
       %foo__met1_ret = load i16, ptr %foo.met1, align [filtered]
       ret i16 %foo__met1_ret
     }

@@ -1257,6 +1257,32 @@ fn any_string_does_not_allow_ints() {
 }
 
 #[test]
+fn any_string_variadic_flags_each_non_string_argument() {
+    // A generic variadic `{ref}` parameter (as used by the stdlib CONCAT/INSERT/... functions):
+    // every argument whose type is not ANY_STRING must be reported individually, while genuine
+    // string arguments are left alone. Regression test for variadic `{ref}` args escaping the
+    // generic type-nature check (they are pointers to the generic type, not the generic directly).
+    let src = r#"
+        FUNCTION CONCAT <T: ANY_STRING> : T
+        VAR_INPUT {ref}
+            args : {sized} T...;
+        END_VAR
+        END_FUNCTION
+
+        FUNCTION mainProg : DINT
+        VAR x : DINT; y : REAL; z : STRING; END_VAR
+            CONCAT(x, y);
+            CONCAT(x, y, z);
+            CONCAT(x, z);
+            CONCAT(1, 'hello');
+        END_FUNCTION
+    "#;
+
+    let diagnostics = parse_and_validate_buffered(src);
+    assert_snapshot!(&diagnostics);
+}
+
+#[test]
 fn any_string_does_not_allow_time() {
     let src = r"
         FUNCTION test<T : ANY_STRING> : INT VAR_INPUT x : T; END_VAR END_FUNCTION
@@ -1627,7 +1653,13 @@ fn generic_call_with_formal_parameter() {
 ";
 
     let diagnostics = parse_and_validate_buffered(src);
-    insta::assert_snapshot!(diagnostics, @r"
+    insta::assert_snapshot!(diagnostics, @"
+    error[E062]: Invalid type nature for generic argument. __STRING_19 is no ANY_NUMBER
+       ┌─ <internal>:21:35
+       │
+    21 │         myLocalNumber := FOO(x := 'INVALID TYPE NATURE'); // invalid type nature
+       │                                   ^^^^^^^^^^^^^^^^^^^^^ Invalid type nature for generic argument. __STRING_19 is no ANY_NUMBER
+
     error[E089]: Invalid call parameters
        ┌─ <internal>:20:30
        │
@@ -1640,16 +1672,56 @@ fn generic_call_with_formal_parameter() {
     20 │         myLocalNumber := FOO(y := 0); // unresolved reference
        │                              ^ Could not resolve reference to y
 
-    error[E062]: Invalid type nature for generic argument. __STRING_19 is no ANY_NUMBER
+    error[E064]: Could not resolve generic type T with ANY_NUMBER
        ┌─ <internal>:21:35
        │
     21 │         myLocalNumber := FOO(x := 'INVALID TYPE NATURE'); // invalid type nature
-       │                                   ^^^^^^^^^^^^^^^^^^^^^ Invalid type nature for generic argument. __STRING_19 is no ANY_NUMBER
+       │                                   ^^^^^^^^^^^^^^^^^^^^^ Could not resolve generic type T with ANY_NUMBER
 
-    error[E037]: Invalid assignment: cannot assign 'STRING' to 'USINT'
+    error[E037]: Invalid assignment: cannot assign 'STRING' to 'T'
        ┌─ <internal>:21:30
        │
     21 │         myLocalNumber := FOO(x := 'INVALID TYPE NATURE'); // invalid type nature
-       │                              ^^^^^^^^^^^^^^^^^^^^^^^^^^ Invalid assignment: cannot assign 'STRING' to 'USINT'
+       │                              ^^^^^^^^^^^^^^^^^^^^^^^^^^ Invalid assignment: cannot assign 'STRING' to 'T'
+    ");
+}
+
+#[test]
+fn unresolved_generic_return_type_is_named_by_its_symbol() {
+    let src = "
+    FUNCTION foo<U: ANY> : U
+    VAR_INPUT
+        in : U;
+    END_VAR
+    END_FUNCTION
+
+    FUNCTION main : DINT
+    VAR
+        arr : ARRAY[0..5] OF INT;
+        arr2 : ARRAY[0..5] OF INT;
+    END_VAR
+        arr2 := foo(SOURCE := arr);
+    END_FUNCTION
+";
+
+    let diagnostics = parse_and_validate_buffered(src);
+    assert_snapshot!(diagnostics, @r"
+    error[E089]: Invalid call parameters
+       ┌─ <internal>:13:21
+       │
+    13 │         arr2 := foo(SOURCE := arr);
+       │                     ^^^^^^^^^^^^^ Invalid call parameters
+
+    error[E048]: Could not resolve reference to SOURCE
+       ┌─ <internal>:13:21
+       │
+    13 │         arr2 := foo(SOURCE := arr);
+       │                     ^^^^^^ Could not resolve reference to SOURCE
+
+    error[E037]: Invalid assignment: cannot assign 'U' to 'ARRAY[0..5] OF INT'
+       ┌─ <internal>:13:9
+       │
+    13 │         arr2 := foo(SOURCE := arr);
+       │         ^^^^^^^^^^^^^^^^^^^^^^^^^^ Invalid assignment: cannot assign 'U' to 'ARRAY[0..5] OF INT'
     ");
 }

@@ -1,6 +1,7 @@
 use chrono::DurationRound;
 use chrono::TimeZone;
 use common::{compile_and_run, get_includes};
+use iec61131std::date_time_numeric_functions as dtf;
 
 // Import common functionality into the integration tests
 mod common;
@@ -15,12 +16,28 @@ struct MainType {
     d: i64,
 }
 
+#[allow(dead_code)]
+#[derive(Default)]
+#[repr(C)]
+struct ShortMainType {
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
+}
+
+const NANOS_PER_DAY: i64 = 60 * 60 * 24 * 1_000_000_000;
+
 fn get_time_from_hms(hour: u32, min: u32, sec: u32) -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_hms_opt(hour, min, sec).unwrap()
 }
 
 fn get_time_from_hms_milli(hour: u32, min: u32, sec: u32, milli: u32) -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_hms_milli_opt(hour, min, sec, milli).unwrap()
+}
+
+fn millis_from_hms(hour: u32, min: u32, sec: u32) -> u32 {
+    ((hour * 60 * 60) + (min * 60) + sec) * 1_000
 }
 
 #[test]
@@ -30,11 +47,259 @@ fn add_time() {
     VAR
         a : TIME;
         b : TIME;
+        c : TIME;
+        d : TIME;
+    END_VAR
+        a := ADD(TIME#5s, TIME#30s);
+        b := ADD_TIME(TIME#10s, TIME#5s);
+        c := ADD(TIME#250ms, TIME#750ms);
+        d := ADD_TIME(TIME#1m, TIME#1s);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, 35_000);
+    assert_eq!(maintype.b, 15_000);
+    assert_eq!(maintype.c, 1_000);
+    assert_eq!(maintype.d, 61_000);
+}
+
+#[test]
+fn add_tod_time() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : TOD;
+        b : TOD;
+        c : TOD;
+        d : TOD;
+    END_VAR
+        a := ADD(TOD#20:00:00, TIME#1s);
+        b := ADD_TOD_TIME(TOD#20:00:02, TIME#1s);
+        c := ADD(TOD#23:59:59, TIME#2s);
+        d := ADD_TOD_TIME(TOD#12:00:00, TIME#12m12s);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, millis_from_hms(20, 0, 1));
+    assert_eq!(maintype.b, millis_from_hms(20, 0, 3));
+    assert_eq!(maintype.c, 1_000);
+    assert_eq!(maintype.d, millis_from_hms(12, 12, 12));
+}
+
+#[test]
+fn add_dt_time() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : DT;
+        b : DT;
+        c : DT;
+        d : DT;
+    END_VAR
+        a := ADD(DT#2000-01-01-12:00:00, TIME#1d12m12s123ms);
+        b := ADD_DT_TIME(DT#2000-01-01-12:00:00, TIME#1d12m12s123ms);
+        c := ADD(DT#1970-01-01-00:00:00, TIME#1s);
+        d := ADD_DT_TIME(DT#1970-01-01-00:00:00, TIME#1500ms);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    let expected = chrono::NaiveDate::from_ymd_opt(2000, 1, 2)
+        .unwrap()
+        .and_hms_opt(12, 12, 12)
+        .unwrap()
+        .and_utc()
+        .timestamp() as u32;
+
+    assert_eq!(maintype.a, expected);
+    assert_eq!(maintype.b, expected);
+    assert_eq!(maintype.c, 1);
+    assert_eq!(maintype.d, 1);
+}
+
+#[test]
+fn sub_time() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : TIME;
+        b : TIME;
+        c : TIME;
+        d : TIME;
+    END_VAR
+        a := SUB(TIME#10s50ms, TIME#50ms);
+        b := SUB_TIME(TIME#5m35s20ms, TIME#1m5s20ms);
+        c := SUB(TIME#10s50ms, TIME#6s20ms);
+        d := SUB_TIME(TIME#5m35s20ms, TIME#1m5s20ms);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, 10_000);
+    assert_eq!(maintype.b, 270_000);
+    assert_eq!(maintype.c, 4_030);
+    assert_eq!(maintype.d, 270_000);
+}
+
+#[test]
+fn sub_date_date() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : TIME;
+        b : TIME;
+        c : TIME;
+        d : TIME;
+    END_VAR
+        a := SUB(DATE#2000-01-21, DATE#2000-01-01);
+        b := SUB_DATE_DATE(DATE#2000-01-31, DATE#2000-01-01);
+        c := SUB(DATE#2000-02-10, DATE#2000-01-31);
+        d := SUB_DATE_DATE(DATE#2000-02-20, DATE#2000-02-10);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, 20 * 24 * 60 * 60 * 1_000);
+    assert_eq!(maintype.b, 30 * 24 * 60 * 60 * 1_000);
+    assert_eq!(maintype.c, 10 * 24 * 60 * 60 * 1_000);
+    assert_eq!(maintype.d, 10 * 24 * 60 * 60 * 1_000);
+}
+
+#[test]
+fn sub_tod_time() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : TOD;
+        b : TOD;
+        c : TOD;
+        d : TOD;
+    END_VAR
+        a := SUB(TOD#23:10:05.123, TIME#3h10m5s123ms);
+        b := SUB_TOD_TIME(TOD#23:10:05.123, TIME#3h10m5s123ms);
+        c := SUB(TOD#00:00:01.000, TIME#2s);
+        d := SUB_TOD_TIME(TOD#12:00:00, TIME#12m12s);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, millis_from_hms(20, 0, 0));
+    assert_eq!(maintype.b, millis_from_hms(20, 0, 0));
+    assert_eq!(maintype.c, millis_from_hms(23, 59, 59));
+    assert_eq!(maintype.d, millis_from_hms(11, 47, 48));
+}
+
+#[test]
+fn sub_tod() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : TIME;
+        b : TIME;
+        c : TIME;
+        d : TIME;
+    END_VAR
+        a := SUB(TOD#23:10:05.123, TOD#3:10:05.123);
+        b := SUB_TOD_TOD(TOD#23:10:05.123, TOD#3:10:05.123);
+        c := SUB(TOD#10:00:00, TOD#09:59:59);
+        d := SUB_TOD_TOD(TOD#01:00:00, TOD#00:59:59);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, millis_from_hms(20, 0, 0));
+    assert_eq!(maintype.b, millis_from_hms(20, 0, 0));
+    assert_eq!(maintype.c, 1_000);
+    assert_eq!(maintype.d, 1_000);
+}
+
+#[test]
+fn sub_dt_time() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : DT;
+        b : DT;
+        c : DT;
+        d : DT;
+    END_VAR
+        a := SUB(DT#2000-01-02-21:15:12.345, TIME#1d1h15m12s345ms);
+        b := SUB_DT_TIME(DT#2000-01-02-21:15:12.345, TIME#1d1h15m12s345ms);
+        c := SUB(DT#1970-01-01-00:00:10, TIME#1s);
+        d := SUB_DT_TIME(DT#1970-01-01-00:00:10, TIME#1500ms);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    let expected = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)
+        .unwrap()
+        .and_hms_opt(20, 0, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp() as u32;
+
+    assert_eq!(maintype.a, expected);
+    assert_eq!(maintype.b, expected);
+    assert_eq!(maintype.c, 9);
+    assert_eq!(maintype.d, 9);
+}
+
+#[test]
+fn sub_dt() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : TIME;
+        b : TIME;
+        c : TIME;
+        d : TIME;
+    END_VAR
+        a := SUB(DT#1970-01-02-11:22:33, DT#1970-01-01-00:00:00);
+        b := SUB_DT_DT(DT#1970-01-02-11:22:33, DT#1970-01-01-00:00:00);
+        c := SUB(DT#1970-01-01-00:00:10, DT#1970-01-01-00:00:00);
+        d := SUB_DT_DT(DT#1970-01-01-00:00:10, DT#1970-01-01-00:00:00);
+    END_PROGRAM";
+    let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
+    let sources = vec![src.into()];
+    let mut maintype = ShortMainType::default();
+    let _: i64 = compile_and_run(sources, includes, &mut maintype);
+
+    assert_eq!(maintype.a, ((24 + 11) * 60 * 60 + 22 * 60 + 33) * 1_000);
+    assert_eq!(maintype.b, ((24 + 11) * 60 * 60 + 22 * 60 + 33) * 1_000);
+    assert_eq!(maintype.c, 10_000);
+    assert_eq!(maintype.d, 10_000);
+}
+
+#[test]
+fn add_ltime() {
+    let src = "
+    PROGRAM main
+    VAR
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := ADD(TIME#5h,TIME#30s);
-        b := ADD_TIME(TIME#10s,TIME#-5s);
+        a := ADD(LTIME#5h,LTIME#30s);
+        b := ADD_LTIME(LTIME#10s,LTIME#-5s);
 
         c := ADD(LTIME#-10s,LTIME#-10s);
         d := ADD_LTIME(LTIME#10s,LTIME#10s);
@@ -51,17 +316,17 @@ fn add_time() {
 }
 
 #[test]
-fn add_tod_time() {
+fn add_ltod_ltime() {
     let src = "
     PROGRAM main
     VAR
-        a : TOD;
-        b : TOD;
+        a : LTOD;
+        b : LTOD;
         c : LTOD;
         d : LTOD;
     END_VAR
-        a := ADD_TOD_TIME(TOD#20:00:00, TIME#1s);
-        b := ADD(TOD#20:00:02, TIME#-1s);
+        a := ADD_LTOD_LTIME(LTOD#20:00:00, LTIME#1s);
+        b := ADD(LTOD#20:00:02, LTIME#-1s);
         c := ADD_LTOD_LTIME(LTOD#12:00:00, LTIME#12m12s);
         d := ADD(LTOD#12:00:00, LTIME#12m12s);
     END_PROGRAM";
@@ -78,17 +343,17 @@ fn add_tod_time() {
 }
 
 #[test]
-fn add_dt_time() {
+fn add_ldt_ltime() {
     let src = "
     PROGRAM main
     VAR
-        a : DT;
-        b : DT;
+        a : LDT;
+        b : LDT;
         c : LDT;
         d : LDT;
     END_VAR
-        a := ADD_DT_TIME(DT#2000-01-01-12:00:00, TIME#1d12m12s123ms);
-        b := ADD(DT#2000-01-01-12:00:00, TIME#1d12m12s123ms);
+        a := ADD_LDT_LTIME(LDT#2000-01-01-12:00:00, LTIME#1d12m12s123ms);
+        b := ADD(LDT#2000-01-01-12:00:00, LTIME#1d12m12s123ms);
         c := ADD_LDT_LTIME(LDT#2000-01-01-12:00:00, LTIME#1d12m12s123ms);
         d := ADD(LDT#2000-01-01-12:00:00, LTIME#1d12m12s123ms);
     END_PROGRAM";
@@ -112,17 +377,17 @@ fn add_dt_time() {
 // add_overflow test moved to tests/lit/single/stdlib_overflow/add_time_overflow.st
 
 #[test]
-fn sub_time() {
+fn sub_ltime() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := SUB(TIME#10h50m, TIME#-10m);
-        b := SUB_TIME(TIME#5h35m20s, TIME#1h5m20s);
+        a := SUB(LTIME#10h50m, LTIME#-10m);
+        b := SUB_LTIME(LTIME#5h35m20s, LTIME#1h5m20s);
 
         c := SUB(LTIME#10h50m, LTIME#6h20m);
         d := SUB_LTIME(LTIME#5h35m20s, LTIME#1h5m20s);
@@ -139,17 +404,17 @@ fn sub_time() {
 }
 
 #[test]
-fn sub_date() {
+fn sub_ldate_ldate() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := SUB(DATE#2000-12-31, DATE#2000-01-01);
-        b := SUB_DATE_DATE(DATE#2000-05-21, DATE#2000-05-01);
+        a := SUB(LDATE#2000-12-31, LDATE#2000-01-01);
+        b := SUB_LDATE_LDATE(LDATE#2000-05-21, LDATE#2000-05-01);
 
         c := SUB(LDATE#2000-12-31, LDATE#2000-01-01);
         d := SUB_LDATE_LDATE(LDATE#2000-05-21, LDATE#2000-05-01);
@@ -167,17 +432,17 @@ fn sub_date() {
 }
 
 #[test]
-fn sub_tod_time() {
+fn sub_ltod_ltime() {
     let src = "
     PROGRAM main
     VAR
-        a : TOD;
-        b : TOD;
+        a : LTOD;
+        b : LTOD;
         c : LTOD;
         d : LTOD;
     END_VAR
-        a := SUB_TOD_TIME(TOD#23:10:05.123, TIME#3h10m5s123ms);
-        b := SUB(TOD#23:10:05.123, TIME#3h10m5s123ms);
+        a := SUB_LTOD_LTIME(LTOD#23:10:05.123, LTIME#3h10m5s123ms);
+        b := SUB(LTOD#23:10:05.123, LTIME#3h10m5s123ms);
         c := SUB_LTOD_LTIME(LTOD#23:10:05.123, LTIME#3h10m5s123ms);
         d := SUB(LTOD#23:10:05.123, LTIME#3h10m5s123ms);
     END_PROGRAM";
@@ -193,17 +458,17 @@ fn sub_tod_time() {
 }
 
 #[test]
-fn sub_tod() {
+fn sub_ltod_ltod() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := SUB(TOD#23:10:05.123, TOD#3:10:05.123);
-        b := SUB_TOD_TOD(TOD#23:10:05.123, TOD#3:10:05.123);
+        a := SUB(LTOD#23:10:05.123, LTOD#3:10:05.123);
+        b := SUB_LTOD_LTOD(LTOD#23:10:05.123, LTOD#3:10:05.123);
         c := SUB(LTOD#23:10:05.123, LTOD#3:10:05.123);
         d := SUB_LTOD_LTOD(LTOD#23:10:05.123, LTOD#3:10:05.123);
     END_PROGRAM";
@@ -219,17 +484,17 @@ fn sub_tod() {
 }
 
 #[test]
-fn sub_dt_time() {
+fn sub_ldt_ltime() {
     let src = "
     PROGRAM main
     VAR
-        a : DT;
-        b : DT;
+        a : LDT;
+        b : LDT;
         c : LDT;
         d : LDT;
     END_VAR
-        a := SUB(DT#2000-01-02-21:15:12.345, TIME#1d1h15m12s345ms);
-        b := SUB_DT_TIME(DT#2000-01-02-21:15:12.345, TIME#1d1h15m12s345ms);
+        a := SUB(LDT#2000-01-02-21:15:12.345, LTIME#1d1h15m12s345ms);
+        b := SUB_LDT_LTIME(LDT#2000-01-02-21:15:12.345, LTIME#1d1h15m12s345ms);
         c := SUB(LDT#2000-01-02-21:15:12.345, LTIME#1d1h15m12s345ms);
         d := SUB_LDT_LTIME(LDT#2000-01-02-21:15:12.345, LTIME#1d1h15m12s345ms);
     END_PROGRAM";
@@ -251,17 +516,17 @@ fn sub_dt_time() {
 }
 
 #[test]
-fn sub_dt() {
+fn sub_ldt_ldt() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := SUB(DT#2000-01-02-21:22:33.444, DT#2000-01-01-10:00:00.000);
-        b := SUB_DT_DT(DT#2000-01-02-21:22:33.444, DT#2000-01-01-10:00:00.000);
+        a := SUB(LDT#2000-01-02-21:22:33.444, LDT#2000-01-01-10:00:00.000);
+        b := SUB_LDT_LDT(LDT#2000-01-02-21:22:33.444, LDT#2000-01-01-10:00:00.000);
         c := SUB(LDT#2000-01-02-21:22:33.444, LDT#2000-01-01-10:00:00.000);
         d := SUB_LDT_LDT(LDT#2000-01-02-21:22:33.444, LDT#2000-01-01-10:00:00.000);
     END_PROGRAM";
@@ -289,13 +554,13 @@ fn mul_signed() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := MUL(TIME#1d, SINT#-120);
-        b := MUL(TIME#1s, INT#3600);
+        a := MUL(LTIME#1d, SINT#-120);
+        b := MUL(LTIME#1s, INT#3600);
         c := MUL(LTIME#1000ms, DINT#86400);
         d := MUL(LTIME#1000ms, LINT#864000000);
     END_PROGRAM";
@@ -320,13 +585,13 @@ fn mul_unsigned() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := MUL(TIME#-1d, USINT#120);
-        b := MUL(TIME#1s, UINT#3600);
+        a := MUL(LTIME#-1d, USINT#120);
+        b := MUL(LTIME#1s, UINT#3600);
         c := MUL(LTIME#1000ms, UDINT#86400);
         d := MUL(LTIME#1000ms, ULINT#864000000);
     END_PROGRAM";
@@ -350,15 +615,15 @@ fn mul_time_signed() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
-        c : TIME;
-        d : TIME;
+        a : LTIME;
+        b : LTIME;
+        c : LTIME;
+        d : LTIME;
     END_VAR
-        a := MUL_TIME(TIME#1d, SINT#-120);
-        b := MUL_TIME(TIME#1s, INT#3600);
-        c := MUL_TIME(TIME#1000ms, DINT#86400);
-        d := MUL_TIME(TIME#1000ms, LINT#864000000);
+        a := MUL_LTIME(LTIME#1d, SINT#-120);
+        b := MUL_LTIME(LTIME#1s, INT#3600);
+        c := MUL_LTIME(LTIME#1000ms, DINT#86400);
+        d := MUL_LTIME(LTIME#1000ms, LINT#864000000);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -378,15 +643,15 @@ fn mul_time_unsigned() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
-        c : TIME;
-        d : TIME;
+        a : LTIME;
+        b : LTIME;
+        c : LTIME;
+        d : LTIME;
     END_VAR
-        a := MUL_TIME(TIME#-1d, USINT#120);
-        b := MUL_TIME(TIME#1s, UINT#3600);
-        c := MUL_TIME(TIME#1000ms, UDINT#86400);
-        d := MUL_TIME(TIME#1000ms, ULINT#864000000);
+        a := MUL_LTIME(LTIME#-1d, USINT#120);
+        b := MUL_LTIME(LTIME#1s, UINT#3600);
+        c := MUL_LTIME(LTIME#1000ms, UDINT#86400);
+        d := MUL_LTIME(LTIME#1000ms, ULINT#864000000);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -462,13 +727,13 @@ fn div_signed() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := DIV(TIME#1m, SINT#60);
-        b := DIV(TIME#1h, INT#-3600);
+        a := DIV(LTIME#1m, SINT#60);
+        b := DIV(LTIME#1h, INT#-3600);
         c := DIV(LTIME#1d, DINT#86400);
         d := DIV(LTIME#10000d, DINT#864000000);
     END_PROGRAM";
@@ -488,13 +753,13 @@ fn div_unsigned() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
         c : LTIME;
         d : LTIME;
     END_VAR
-        a := DIV(TIME#1m, USINT#60);
-        b := DIV(TIME#-1h, UINT#3600);
+        a := DIV(LTIME#1m, USINT#60);
+        b := DIV(LTIME#-1h, UINT#3600);
         c := DIV(LTIME#1d, UDINT#86400);
         d := DIV(LTIME#10000d, UDINT#864000000);
     END_PROGRAM";
@@ -516,15 +781,15 @@ fn div_time_signed() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
-        c : TIME;
-        d : TIME;
+        a : LTIME;
+        b : LTIME;
+        c : LTIME;
+        d : LTIME;
     END_VAR
-        a := DIV_TIME(TIME#1m, SINT#60);
-        b := DIV_TIME(TIME#1h, INT#-3600);
-        c := DIV_TIME(TIME#1d, DINT#86400);
-        d := DIV_TIME(TIME#10000d, DINT#864000000);
+        a := DIV_LTIME(LTIME#1m, SINT#60);
+        b := DIV_LTIME(LTIME#1h, INT#-3600);
+        c := DIV_LTIME(LTIME#1d, DINT#86400);
+        d := DIV_LTIME(LTIME#10000d, DINT#864000000);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -542,15 +807,15 @@ fn div_time_unsigned() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
-        c : TIME;
-        d : TIME;
+        a : LTIME;
+        b : LTIME;
+        c : LTIME;
+        d : LTIME;
     END_VAR
-        a := DIV_TIME(TIME#1m, USINT#60);
-        b := DIV_TIME(TIME#-1h, UINT#3600);
-        c := DIV_TIME(TIME#1d, UDINT#86400);
-        d := DIV_TIME(TIME#10000d, UDINT#864000000);
+        a := DIV_LTIME(LTIME#1m, USINT#60);
+        b := DIV_LTIME(LTIME#-1h, UINT#3600);
+        c := DIV_LTIME(LTIME#1d, UDINT#86400);
+        d := DIV_LTIME(LTIME#10000d, UDINT#864000000);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -621,13 +886,13 @@ fn mul_real() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
+        a : LTIME;
         b : LTIME;
-        c : TIME;
+        c : LTIME;
     END_VAR
-        a := MUL(TIME#-2s700ms, REAL#3.14);
+        a := MUL(LTIME#-2s700ms, REAL#3.14);
         b := MUL(LTIME#2s700ms, REAL#3.14e5);
-        c := MUL(TIME#2s700ms, REAL#-3.14);
+        c := MUL(LTIME#2s700ms, REAL#-3.14);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -656,13 +921,13 @@ fn mul_lreal() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
+        a : LTIME;
         b : LTIME;
-        c : TIME;
+        c : LTIME;
     END_VAR
-        a := MUL(TIME#-2s700ms, LREAL#3.14);
+        a := MUL(LTIME#-2s700ms, LREAL#3.14);
         b := MUL(LTIME#2s700ms, LREAL#3.14e5);
-        c := MUL(TIME#-2s700ms, LREAL#-3.14);
+        c := MUL(LTIME#-2s700ms, LREAL#-3.14);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -698,11 +963,11 @@ fn mul_time() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
     END_VAR
-        a := MUL_TIME(TIME#2s700ms, REAL#3.14);
-        b := MUL_TIME(TIME#2s700ms, LREAL#3.14e5);
+        a := MUL_LTIME(LTIME#2s700ms, REAL#3.14);
+        b := MUL_LTIME(LTIME#2s700ms, LREAL#3.14e5);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -753,10 +1018,10 @@ fn div_real() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
+        a : LTIME;
         b : LTIME;
     END_VAR
-        a := DIV(TIME#-8s478ms, REAL#3.14);
+        a := DIV(LTIME#-8s478ms, REAL#3.14);
         b := DIV(LTIME#847800s, REAL#3.14e5);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
@@ -780,10 +1045,10 @@ fn div_lreal() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
+        a : LTIME;
         b : LTIME;
     END_VAR
-        a := DIV(TIME#-8s478ms, LREAL#3.14);
+        a := DIV(LTIME#-8s478ms, LREAL#3.14);
         b := DIV(LTIME#847800s, LREAL#3.14e5);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
@@ -807,11 +1072,11 @@ fn div_time() {
     let src = "
     PROGRAM main
     VAR
-        a : TIME;
-        b : TIME;
+        a : LTIME;
+        b : LTIME;
     END_VAR
-        a := DIV_TIME(TIME#8s478ms, REAL#3.14);
-        b := DIV_TIME(TIME#847800s, LREAL#3.14e5);
+        a := DIV_LTIME(LTIME#8s478ms, REAL#3.14);
+        b := DIV_LTIME(LTIME#847800s, LREAL#3.14e5);
     END_PROGRAM";
     let includes = get_includes(&["date_time_numeric_functions.st", "arithmetic_functions.st"]);
     let sources = vec![src.into()];
@@ -853,19 +1118,10 @@ fn div_ltime() {
 }
 
 #[test]
-#[should_panic]
-fn date_time_overloaded_add_function_called_with_too_many_params() {
+fn date_time_add_takes_any_number_of_durations() {
     let src = "
         FUNCTION main : LINT
-            // This test should panic because the argument count is incorrect, i.e. `ADD_TIME` is defined as
-            // FUNCTION ADD_TIME : TIME
-            //   VAR_INPUT
-            //     IN1: TIME;
-            //     IN2: TIME;
-            //   END_VAR
-            // END_FUNCTION`
-
-            ADD(TIME#3h, TIME#2h, TIME#2h, TIME#3h, TIME#30s);
+            main := ADD(LTIME#3h, LTIME#2h, LTIME#2h, LTIME#3h, LTIME#30s);
         END_FUNCTION
     ";
 
@@ -885,8 +1141,8 @@ fn date_time_overloaded_add_and_numerical_add_compile_correctly() {
             b: REAL;
         END_VAR
         VAR_TEMP
-            var_tod : TOD := TOD#23:00:01;
-            var_time : TIME := TIME#55m59s;
+            var_tod : LTOD := LTOD#23:00:01;
+            var_time : LTIME := LTIME#55m59s;
             var_real : REAL := 1.0;
             var_dint : DINT := 10;
         END_VAR
@@ -910,3 +1166,296 @@ fn date_time_overloaded_add_and_numerical_add_compile_correctly() {
     assert_eq!(tod_23h_56m, maintype.a);
     assert_eq!(18.0, maintype.b);
 }
+
+macro_rules! wrapping_tests {
+    ($(($name:ident, $func:path, $lhs:expr, $rhs:expr, $expected:expr)),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_eq!($func($lhs, $rhs), $expected);
+            }
+        )+
+    };
+}
+
+// Overflow at the top of the range: MAX + 1 rolls over to the minimum (0 or i64::MIN).
+wrapping_tests!(
+    (add_time_wraps_on_overflow, dtf::ADD_TIME, u32::MAX, 1, 0),
+    (add_dt_time_wraps_on_overflow, dtf::ADD_DT_TIME, u32::MAX, 1_000, 0),
+    (add_ltime_wraps_on_overflow, dtf::ADD_LTIME, i64::MAX, 1, i64::MIN),
+    (add_ltod_ltime_wraps_at_midnight, dtf::ADD_LTOD_LTIME, NANOS_PER_DAY - 1, 2, 1),
+    (add_ldt_ltime_wraps_on_overflow, dtf::ADD_LDT_LTIME, i64::MAX, 1, i64::MIN),
+);
+
+// Underflow below zero: the deficit reappears at the top of the range,
+// e.g. 2_000 - 5_000 = MAX - 2_999; the largest delta MAX - MIN wraps to -1.
+wrapping_tests!(
+    (sub_time_wraps_on_underflow, dtf::SUB_TIME, 2_000, 5_000, u32::MAX - 2_999),
+    (sub_tod_tod_wraps_on_underflow, dtf::SUB_TOD_TOD, 1_000, 2_000, u32::MAX - 999),
+    (sub_dt_time_wraps_on_underflow, dtf::SUB_DT_TIME, 0, 1_000, u32::MAX),
+    (sub_ltime_wraps_on_underflow, dtf::SUB_LTIME, i64::MIN, 1, i64::MAX),
+    (sub_ltod_ltime_wraps_at_midnight, dtf::SUB_LTOD_LTIME, 0, 1, NANOS_PER_DAY - 1),
+    (sub_ldt_ltime_wraps_on_underflow, dtf::SUB_LDT_LTIME, i64::MIN, 1, i64::MAX),
+    (sub_ldate_ldate_wraps_on_large_delta, dtf::SUB_LDATE_LDATE, i64::MAX, i64::MIN, -1),
+    (sub_ltod_ltod_wraps_on_large_delta, dtf::SUB_LTOD_LTOD, i64::MAX, i64::MIN, -1),
+    (sub_ldt_ldt_wraps_on_large_delta, dtf::SUB_LDT_LDT, i64::MAX, i64::MIN, -1),
+);
+
+// DATE/DT differences return TIME in milliseconds. A delta above the ~49.7 day TIME range
+// wraps during the seconds to milliseconds conversion:
+// 50 days = 4_320_000_000 ms = 25_032_704 mod 2^32.
+wrapping_tests!(
+    (
+        sub_date_date_wraps_when_time_difference_exceeds_time_range,
+        dtf::SUB_DATE_DATE,
+        50 * 24 * 60 * 60,
+        0,
+        25_032_704
+    ),
+    (
+        sub_dt_dt_wraps_when_time_difference_exceeds_time_range,
+        dtf::SUB_DT_DT,
+        50 * 24 * 60 * 60,
+        0,
+        25_032_704
+    ),
+);
+
+// MUL: i64::MAX * 2 wraps to -2 for every factor width. The last case uses a factor
+// above i64::MAX to check that the u64 to i64 cast keeps the result correct mod 2^64.
+wrapping_tests!(
+    (mul_time_lint_wraps_on_overflow, dtf::MUL_TIME__LINT, u32::MAX, 2, u32::MAX - 1),
+    (mul_ltime_lint_wraps_on_overflow, dtf::MUL_LTIME__LINT, i64::MAX, 2, -2),
+    (mul_time_sint_wraps_on_overflow, dtf::MUL_TIME__SINT, u32::MAX, 2_i8, u32::MAX - 1),
+    (mul_ltime_sint_wraps_on_overflow, dtf::MUL_LTIME__SINT, i64::MAX, 2_i8, -2),
+    (mul_time_int_wraps_on_overflow, dtf::MUL_TIME__INT, u32::MAX, 2_i16, u32::MAX - 1),
+    (mul_ltime_int_wraps_on_overflow, dtf::MUL_LTIME__INT, i64::MAX, 2_i16, -2),
+    (mul_time_dint_wraps_on_overflow, dtf::MUL_TIME__DINT, u32::MAX, 2_i32, u32::MAX - 1),
+    (mul_ltime_dint_wraps_on_overflow, dtf::MUL_LTIME__DINT, i64::MAX, 2_i32, -2),
+    (mul_time_usint_wraps_on_overflow, dtf::MUL_TIME__USINT, u32::MAX, 2_u8, u32::MAX - 1),
+    (mul_ltime_usint_wraps_on_overflow, dtf::MUL_LTIME__USINT, i64::MAX, 2_u8, -2),
+    (mul_time_uint_wraps_on_overflow, dtf::MUL_TIME__UINT, u32::MAX, 2_u16, u32::MAX - 1),
+    (mul_ltime_uint_wraps_on_overflow, dtf::MUL_LTIME__UINT, i64::MAX, 2_u16, -2),
+    (mul_time_udint_wraps_on_overflow, dtf::MUL_TIME__UDINT, u32::MAX, 2_u32, u32::MAX - 1),
+    (mul_ltime_udint_wraps_on_overflow, dtf::MUL_LTIME__UDINT, i64::MAX, 2_u32, -2),
+    (mul_time_ulint_wraps_on_overflow, dtf::MUL_TIME__ULINT, u32::MAX, 2_u64, u32::MAX - 1),
+    (mul_ltime_ulint_wraps_on_overflow, dtf::MUL_LTIME__ULINT, i64::MAX, 2_u64, -2),
+    (mul_time_ulint_wraps_when_factor_exceeds_lint, dtf::MUL_TIME__ULINT, 1, u64::MAX, u32::MAX),
+);
+
+// Integer division panics only on a zero divisor (see the panic_*_div_zero suites);
+// every other input is total: i64::MIN / -1 wraps and a u64 divisor above the
+// signed range always exceeds the dividend magnitude, so the quotient is zero.
+#[test]
+fn div_time_by_minus_one_wraps() {
+    assert_eq!(dtf::DIV_TIME__LINT(1, -1), u32::MAX);
+    assert_eq!(dtf::DIV_LTIME__LINT(i64::MIN, -1), i64::MIN);
+}
+
+#[test]
+fn div_time_by_unsigned_divisor_above_lint_range_yields_zero() {
+    assert_eq!(dtf::DIV_TIME__ULINT(u32::MAX, u64::MAX), 0);
+    assert_eq!(dtf::DIV_LTIME__ULINT(i64::MIN, u64::MAX), 0);
+}
+
+// Float factors: a NaN yields zero and oversized results saturate at the TIME range
+// (sign-aware), instead of panicking inside std::time::Duration.
+#[test]
+fn mul_time_with_nan_factor_yields_zero() {
+    assert_eq!(dtf::MUL_TIME__REAL(1_000, f32::NAN), 0);
+    assert_eq!(dtf::MUL_LTIME__REAL(1_000, f32::NAN), 0);
+    assert_eq!(dtf::MUL_TIME__LREAL(1_000, f64::NAN), 0);
+    assert_eq!(dtf::MUL_LTIME__LREAL(1_000, f64::NAN), 0);
+}
+
+#[test]
+fn mul_time_with_oversized_float_factor_saturates() {
+    assert_eq!(dtf::MUL_TIME__REAL(u32::MAX, f32::MAX), u32::MAX);
+    assert_eq!(dtf::MUL_LTIME__REAL(i64::MAX, 2.0), i64::MAX);
+    assert_eq!(dtf::MUL_TIME__LREAL(u32::MAX, f64::MAX), u32::MAX);
+    assert_eq!(dtf::MUL_LTIME__LREAL(i64::MAX, 2.0), i64::MAX);
+}
+
+#[test]
+fn mul_time_with_a_negative_float_factor_wraps() {
+    assert_eq!(dtf::MUL_TIME__REAL(1_000, -2.0), u32::MAX - 1_999);
+    assert_eq!(dtf::MUL_TIME__LREAL(1_000, -2.0), u32::MAX - 1_999);
+}
+
+#[test]
+fn mul_ltime_with_an_oversized_negative_float_factor_saturates() {
+    assert_eq!(dtf::MUL_LTIME__REAL(i64::MAX, -2.0), -i64::MAX);
+    assert_eq!(dtf::MUL_LTIME__LREAL(i64::MIN, 2.0), -i64::MAX);
+}
+
+#[test]
+fn mul_zero_time_with_infinite_factor_yields_zero() {
+    assert_eq!(dtf::MUL_TIME__REAL(0, f32::INFINITY), 0);
+    assert_eq!(dtf::MUL_TIME__LREAL(0, f64::INFINITY), 0);
+}
+
+#[test]
+fn div_time_by_nan_yields_zero() {
+    assert_eq!(dtf::DIV_TIME__REAL(1_000, f32::NAN), 0);
+    assert_eq!(dtf::DIV_TIME__LREAL(1_000, f64::NAN), 0);
+}
+
+#[test]
+fn div_time_by_tiny_float_saturates() {
+    assert_eq!(dtf::DIV_TIME__REAL(u32::MAX, f32::MIN_POSITIVE), u32::MAX);
+    assert_eq!(dtf::DIV_TIME__LREAL(u32::MAX, f64::MIN_POSITIVE), u32::MAX);
+    assert_eq!(dtf::DIV_LTIME__LREAL(i64::MAX, 0.5), i64::MAX);
+    assert_eq!(dtf::DIV_LTIME__LREAL(i64::MAX, -0.5), -i64::MAX);
+}
+
+#[test]
+fn div_time_by_zero_float_saturates() {
+    assert_eq!(dtf::DIV_TIME__REAL(1, 0.0), u32::MAX);
+    assert_eq!(dtf::DIV_LTIME__REAL(1, 0.0), i64::MAX);
+    assert_eq!(dtf::DIV_TIME__LREAL(1, 0.0), u32::MAX);
+    assert_eq!(dtf::DIV_LTIME__LREAL(1, 0.0), i64::MAX);
+    assert_eq!(dtf::DIV_LTIME__REAL(-1, 0.0), -i64::MAX);
+    assert_eq!(dtf::DIV_LTIME__LREAL(1, -0.0), -i64::MAX);
+}
+
+#[test]
+fn div_zero_time_by_zero_float_yields_zero() {
+    assert_eq!(dtf::DIV_TIME__REAL(0, 0.0), 0);
+    assert_eq!(dtf::DIV_TIME__LREAL(0, 0.0), 0);
+}
+
+macro_rules! panic_i8_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_i8);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_i16_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_i16);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_i32_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_i32);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_i64_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_i64);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_u8_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_u8);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_u16_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_u16);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_u32_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_u32);
+            }
+        )+
+    };
+}
+
+macro_rules! panic_u64_div_zero_tests {
+    ($(($name:ident, $func:path)),+ $(,)?) => {
+        $(
+            #[test]
+            #[should_panic]
+            fn $name() {
+                let _ = $func(1, 0_u64);
+            }
+        )+
+    };
+}
+
+panic_i8_div_zero_tests!(
+    (div_time_sint_panics_on_zero, dtf::DIV_TIME__SINT),
+    (div_ltime_sint_panics_on_zero, dtf::DIV_LTIME__SINT),
+);
+
+panic_i16_div_zero_tests!(
+    (div_time_int_panics_on_zero, dtf::DIV_TIME__INT),
+    (div_ltime_int_panics_on_zero, dtf::DIV_LTIME__INT),
+);
+
+panic_i32_div_zero_tests!(
+    (div_time_dint_panics_on_zero, dtf::DIV_TIME__DINT),
+    (div_ltime_dint_panics_on_zero, dtf::DIV_LTIME__DINT),
+);
+
+panic_i64_div_zero_tests!(
+    (div_time_lint_panics_on_zero, dtf::DIV_TIME__LINT),
+    (div_ltime_lint_panics_on_zero, dtf::DIV_LTIME__LINT),
+);
+
+panic_u8_div_zero_tests!(
+    (div_time_usint_panics_on_zero, dtf::DIV_TIME__USINT),
+    (div_ltime_usint_panics_on_zero, dtf::DIV_LTIME__USINT),
+);
+
+panic_u16_div_zero_tests!(
+    (div_time_uint_panics_on_zero, dtf::DIV_TIME__UINT),
+    (div_ltime_uint_panics_on_zero, dtf::DIV_LTIME__UINT),
+);
+
+panic_u32_div_zero_tests!(
+    (div_time_udint_panics_on_zero, dtf::DIV_TIME__UDINT),
+    (div_ltime_udint_panics_on_zero, dtf::DIV_LTIME__UDINT),
+);
+
+panic_u64_div_zero_tests!(
+    (div_time_ulint_panics_on_zero, dtf::DIV_TIME__ULINT),
+    (div_ltime_ulint_panics_on_zero, dtf::DIV_LTIME__ULINT),
+);

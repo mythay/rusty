@@ -1,14 +1,13 @@
 use std::{
-    collections::HashMap,
     env,
     ffi::OsStr,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 
 use crate::{
+    build,
     cli::{self, CompileParameters, ConfigOption, GenerateOption, SubCommands},
     get_project, CompileOptions, LinkOptions, LinkerScript,
 };
@@ -23,7 +22,10 @@ use plc::{
     codegen::{CodegenContext, GeneratedModule},
     index::{indexer, FxIndexSet, Index},
     linker::LinkerType,
-    lowering::{calls::AggregateTypeLowerer, polymorphism::PolymorphismLowerer, property::PropertyLowerer},
+    lowering::{
+        calls::AggregateTypeLowerer, generics::GenericLowerer, polymorphism::PolymorphismLowerer,
+        property::PropertyLowerer,
+    },
     output::{FormatOption, RelocationPreference},
     parser::parse_file,
     resolver::{
@@ -31,7 +33,7 @@ use plc::{
         TypeAnnotator,
     },
     validation::Validator,
-    ConfigFormat, ErrorFormat, OnlineChange, Target, Threads,
+    ConfigFormat, ErrorFormat, Target, Threads,
 };
 use plc_diagnostics::{
     diagnostician::Diagnostician,
@@ -53,9 +55,6 @@ use project::{
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use source_code::{source_location::SourceLocation, SourceContainer};
-
-use serde_json;
-use toml;
 
 pub mod participant;
 pub mod property;
@@ -206,23 +205,8 @@ impl<T: SourceContainer> BuildPipeline<T> {
                 debug_prefix_maps: params.debug_prefix_maps(),
                 debug_compilation_dir: params.debug_compilation_dir.clone(),
                 single_module: params.single_module,
-                online_change: if params.online_change {
-                    OnlineChange::Enabled {
-                        file_name: params.got_layout_file.clone(),
-                        format: params.got_layout_format(),
-                    }
-                } else {
-                    OnlineChange::Disabled
-                },
                 constructors_only: params.constructors_only,
-                // Resolved at *this crate's* build time via `build.rs`; if
-                // `RUSTY_BUILD_INFO` was not set we skip rather than embed a
-                // placeholder.
-                build_info: if params.fno_ident {
-                    None
-                } else {
-                    option_env!("RUSTY_BUILD_INFO").map(|info| format!("plc version {info}"))
-                },
+                build_info: (!params.fno_ident).then(ident),
             }
         })
     }
@@ -274,6 +258,7 @@ impl<T: SourceContainer> BuildPipeline<T> {
                 linker_args: params.linker_args.clone(),
                 no_crt: params.no_crt,
                 no_libc: params.no_libc,
+                allow_undefined_symbols: params.allow_undefined_symbols,
                 relocation_preference,
                 lib_location: params.get_lib_location(),
                 build_location: params.get_build_location(),
@@ -344,10 +329,13 @@ impl<T: SourceContainer> BuildPipeline<T> {
     }
 
     pub fn get_default_mut_participants(&self) -> Vec<Box<dyn PipelineParticipantMut>> {
-        use participant::{ArrayLowerer, InitParticipant};
+        use participant::{ArrayLowerer, CfcParticipant, InitParticipant};
+
+        let cfc_sources = self.context.sources_cfc().cloned().collect();
 
         // XXX: should we use a static array of participants?
         let mut_participants: Vec<Box<dyn PipelineParticipantMut>> = vec![
+            Box::new(CfcParticipant::new(self.context.provider(), cfc_sources)),
             Box::new(LoopDesugarer::new(self.context.provider())),
             Box::new(PropertyLowerer::new(self.context.provider())),
             Box::new(PolymorphismLowerer::new(
@@ -363,6 +351,9 @@ impl<T: SourceContainer> BuildPipeline<T> {
                 self.context.should_generate_external_constructors(),
             )),
             Box::new(RetainParticipant::new(self.context.provider())),
+            // Resolve generic calls to concrete monomorphizations (materialized as {external} POUs)
+            // before the aggregate-return lowerer, so it only ever sees concrete calls.
+            Box::new(GenericLowerer::new(self.context.provider())),
             Box::new(AggregateTypeLowerer::new(self.context.provider())),
             Box::new(InheritanceLowerer::new(self.context.provider())),
             Box::new(ArrayLowerer::new(self.context.provider())),
@@ -396,11 +387,6 @@ impl<T: SourceContainer> Pipeline for BuildPipeline<T> {
         {
             return self.print_config_options(options);
         }
-        if let Some(CompileParameters { build_info: true, .. }) = self.compile_parameters {
-            println!("{}", option_env!("RUSTY_BUILD_INFO").unwrap_or("version information unavailable"));
-            return Ok(());
-        }
-
         if let Some(CompileParameters { commands: Some(SubCommands::Explain { error }), .. }) =
             &self.compile_parameters
         {
@@ -532,12 +518,6 @@ impl<T: SourceContainer> Pipeline for BuildPipeline<T> {
             log::debug!("No compile options provided");
             return Ok(());
         };
-        let got_layout = if let OnlineChange::Enabled { file_name, format } = &compile_options.online_change {
-            read_got_layout(file_name, *format)?
-        } else {
-            HashMap::default()
-        };
-        let got_layout = Mutex::new(got_layout);
         let target = self.compile_parameters.as_ref().and_then(|it| it.target.as_ref());
         if compile_options.single_module || matches!(compile_options.output_format, FormatOption::Object) {
             log::info!("Using single module mode");
@@ -560,15 +540,11 @@ impl<T: SourceContainer> Pipeline for BuildPipeline<T> {
                         unit,
                         dependencies,
                         literals,
-                        &got_layout,
                         target,
                     )?;
                     self.participants.iter().try_fold((), |_, participant| participant.generate(&module))
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
-        }
-        if let OnlineChange::Enabled { file_name, format } = &compile_options.online_change {
-            write_got_layout(got_layout.into_inner().unwrap(), file_name, *format)?;
         }
         self.participants
             .iter()
@@ -586,8 +562,12 @@ impl<T: SourceContainer> Pipeline for BuildPipeline<T> {
 
         let mut generated_headers: Vec<Box<dyn GeneratedHeader>> = Vec::new();
 
-        for unit in project.units {
-            generated_headers.push(get_generated_header(&generate_header_options, &unit.unit)?);
+        for unit in &project.units {
+            generated_headers.push(get_generated_header(
+                &generate_header_options,
+                &unit.unit,
+                &project.index,
+            )?);
         }
 
         let output_file = self.get_header_output_file().unwrap_or_default();
@@ -606,37 +586,13 @@ impl<T: SourceContainer> Pipeline for BuildPipeline<T> {
     }
 }
 
-pub fn read_got_layout(location: &str, format: ConfigFormat) -> Result<HashMap<String, u64>, Diagnostic> {
-    if !Path::new(location).is_file() {
-        // Assume if the file doesn't exist that there is no existing GOT layout yet. write_got_layout will handle
-        // creating our file when we want to.
-        return Ok(HashMap::new());
+/// Identifies the compiler in the `.comment` section of compiled artifacts. Omits the build
+/// time so that rebuilding the same source with the same compiler gives identical artifacts.
+fn ident() -> String {
+    match build::SHORT_COMMIT {
+        "" => format!("plc version {}", build::PKG_VERSION),
+        commit => format!("plc version {} ({}, {commit})", build::PKG_VERSION, build::COMMIT_DATE),
     }
-
-    let s = fs::read_to_string(location)
-        .map_err(|_| Diagnostic::new("GOT layout could not be read from file"))?;
-    match format {
-        ConfigFormat::JSON => serde_json::from_str(&s)
-            .map_err(|_| Diagnostic::new("Could not deserialize GOT layout from JSON")),
-        ConfigFormat::TOML => {
-            toml::de::from_str(&s).map_err(|_| Diagnostic::new("Could not deserialize GOT layout from TOML"))
-        }
-    }
-}
-
-fn write_got_layout(
-    got_entries: HashMap<String, u64>,
-    location: &str,
-    format: ConfigFormat,
-) -> Result<(), Diagnostic> {
-    let s = match format {
-        ConfigFormat::JSON => serde_json::to_string(&got_entries)
-            .map_err(|_| Diagnostic::new("Could not serialize GOT layout to JSON"))?,
-        ConfigFormat::TOML => toml::ser::to_string(&got_entries)
-            .map_err(|_| Diagnostic::new("Could not serialize GOT layout to TOML"))?,
-    };
-
-    fs::write(location, s).map_err(|_| Diagnostic::new("GOT layout could not be written to file"))
 }
 
 fn write_header_file(generated_header: Box<dyn GeneratedHeader>) -> Result<(), Diagnostic> {
@@ -682,7 +638,7 @@ impl ParsedProject {
 
                 let parse_func = match source.get_type() {
                     source_code::SourceType::Text => parse_file,
-                    source_code::SourceType::Xml => cfc::xml_parser::parse_file,
+                    source_code::SourceType::Xml => plc_cfc::parse_file,
                     source_code::SourceType::Unknown => unreachable!(),
                 };
 
@@ -871,27 +827,12 @@ impl AnnotatedProject {
     }
 
     pub fn codegen_to_string(&self, compile_options: &CompileOptions) -> Result<Vec<String>, Diagnostic> {
-        let got_layout = if let OnlineChange::Enabled { file_name, format } = &compile_options.online_change {
-            read_got_layout(file_name, *format)?
-        } else {
-            HashMap::default()
-        };
-        let got_layout = Mutex::new(got_layout);
-
         self.units
             .iter()
             .map(|AnnotatedUnit { unit, dependencies, literals }| {
                 let context = CodegenContext::create();
-                self.generate_module(
-                    &context,
-                    compile_options,
-                    unit,
-                    dependencies,
-                    literals,
-                    &got_layout,
-                    None,
-                )
-                .map(|it| it.persist_to_string())
+                self.generate_module(&context, compile_options, unit, dependencies, literals, None)
+                    .map(|it| it.persist_to_string())
             })
             .collect()
     }
@@ -902,27 +843,12 @@ impl AnnotatedProject {
         compile_options: &CompileOptions,
         target: Option<&Target>,
     ) -> Result<Option<GeneratedModule<'ctx>>, Diagnostic> {
-        let got_layout = if let OnlineChange::Enabled { file_name, format } = &compile_options.online_change {
-            read_got_layout(file_name, *format)?
-        } else {
-            HashMap::default()
-        };
-        let got_layout = Mutex::new(got_layout);
-
         let Some(module) = self
             .units
             .iter()
             // TODO: this can be parallelized
             .map(|AnnotatedUnit { unit, dependencies, literals }| {
-                self.generate_module(
-                    context,
-                    compile_options,
-                    unit,
-                    dependencies,
-                    literals,
-                    &got_layout,
-                    target,
-                )
+                self.generate_module(context, compile_options, unit, dependencies, literals, target)
             })
             .reduce(|a, b| {
                 let a = a?;
@@ -935,7 +861,6 @@ impl AnnotatedProject {
         module.map(Some)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn generate_module<'ctx>(
         &self,
         context: &'ctx CodegenContext,
@@ -943,7 +868,6 @@ impl AnnotatedProject {
         unit: &CompilationUnit,
         dependencies: &FxIndexSet<Dependency>,
         literals: &StringLiterals,
-        got_layout: &Mutex<HashMap<String, u64>>,
         target: Option<&Target>,
     ) -> Result<GeneratedModule<'ctx>, Diagnostic> {
         // Determine target from compile_options or use default
@@ -957,8 +881,6 @@ impl AnnotatedProject {
             compile_options.debug_level,
             &compile_options.debug_prefix_maps,
             compile_options.debug_compilation_dir.as_deref(),
-            //FIXME don't clone here
-            compile_options.online_change.clone(),
             target,
             compile_options.build_info.as_deref(),
         );
@@ -970,7 +892,6 @@ impl AnnotatedProject {
             literals,
             dependencies,
             &self.index,
-            got_layout,
             compile_options.constructors_only,
         )?;
         code_generator
@@ -1004,7 +925,7 @@ impl AnnotatedProject {
             let obj: Object = module?
                 .unwrap()
                 .persist(
-                    Some(&compile_directory),
+                    Some(&target.append_to(&compile_directory)),
                     &compile_options.output,
                     compile_options.output_format,
                     compile_options.relocation_preference,
@@ -1024,24 +945,10 @@ impl AnnotatedProject {
         context: &'ctx CodegenContext,
         compile_options: &CompileOptions,
     ) -> Result<Vec<GeneratedModule<'ctx>>, Diagnostic> {
-        let got_layout = if let OnlineChange::Enabled { file_name, format } = &compile_options.online_change {
-            read_got_layout(file_name, *format)?
-        } else {
-            HashMap::default()
-        };
-        let got_layout = Mutex::new(got_layout);
         self.units
             .iter()
             .map(|AnnotatedUnit { unit, dependencies, literals }| {
-                self.generate_module(
-                    context,
-                    compile_options,
-                    unit,
-                    dependencies,
-                    literals,
-                    &got_layout,
-                    None,
-                )
+                self.generate_module(context, compile_options, unit, dependencies, literals, None)
             })
             .collect()
     }
@@ -1075,10 +982,7 @@ impl AnnotatedProject {
 /// Ensures the directores for the various targets have been created
 fn ensure_compile_dirs(targets: &[Target], compile_directory: &Path) -> Result<(), Diagnostic> {
     for target in targets {
-        if let Some(name) = target.try_get_name() {
-            let dir = compile_directory.join(name);
-            fs::create_dir_all(dir)?;
-        }
+        fs::create_dir_all(target.append_to(compile_directory))?;
     }
     Ok(())
 }
@@ -1173,8 +1077,11 @@ impl GeneratedProject {
             _ => {
                 // Only initialize a linker if we need to use it
                 let target_triple = self.target.get_target_triple();
-                let mut linker =
-                    plc::linker::Linker::new(&target_triple.as_str().to_string_lossy(), link_options.linker)?;
+                let mut linker = plc::linker::Linker::new(
+                    &target_triple.as_str().to_string_lossy(),
+                    self.target.get_sysroot(),
+                    link_options.linker,
+                )?;
                 if let Some(fuse) = &link_options.fuse_linker {
                     log::debug!("Applying --fuse-ld={fuse}");
                     linker.set_fuse_ld(fuse);
@@ -1232,6 +1139,20 @@ impl GeneratedProject {
                 {
                     log::debug!("Applying -no-pie for --fno-pic executable link");
                     linker.add_driver_flag("-no-pie");
+                }
+
+                // Reject unresolved symbols when producing a shared object (unless explicitly
+                // allowed). An executable link already fails on undefined symbols, but a shared
+                // object link permits them by default; forcing `--no-undefined` turns a missing
+                // symbol (e.g. an unprovided generic monomorphization) into a build failure instead
+                // of an unresolved reference that would only surface at dlopen/final-link time.
+                if matches!(
+                    link_options.format,
+                    FormatOption::Shared | FormatOption::PIC | FormatOption::NoPIC
+                ) && !link_options.allow_undefined_symbols
+                {
+                    log::debug!("Applying --no-undefined for shared object link");
+                    linker.set_no_undefined();
                 }
 
                 match link_options.format {

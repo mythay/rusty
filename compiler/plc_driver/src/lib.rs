@@ -24,16 +24,20 @@ use plc::{
     codegen::CodegenContext,
     linker::LinkerType,
     output::{FormatOption, RelocationPreference},
-    DebugLevel, ErrorFormat, OnlineChange, OptimizationLevel,
+    DebugLevel, ErrorFormat, OptimizationLevel, Target,
 };
 
 use plc_diagnostics::{diagnostician::Diagnostician, diagnostics::Diagnostic, reporter::DiagnosticReporter};
 use plc_index::GlobalContext;
 use project::project::Project;
+use shadow_rs::shadow;
 use source_code::SourceContainer;
 
+pub mod artifacts;
 pub mod cli;
 pub mod pipelines;
+
+shadow!(build);
 
 #[cfg(test)]
 mod tests;
@@ -60,7 +64,6 @@ pub struct CompileOptions {
     pub debug_prefix_maps: Vec<(PathBuf, PathBuf)>,
     pub debug_compilation_dir: Option<PathBuf>,
     pub single_module: bool,
-    pub online_change: OnlineChange,
     pub constructors_only: bool,
     /// Producer string embedded in the compiled module's `llvm.ident` named
     /// metadata. Surfaces in the ELF `.comment` section post-link. `None`
@@ -82,7 +85,6 @@ impl Default for CompileOptions {
             debug_prefix_maps: vec![],
             debug_compilation_dir: None,
             single_module: false,
-            online_change: OnlineChange::Disabled,
             constructors_only: false,
             build_info: None,
         }
@@ -103,6 +105,9 @@ pub struct LinkOptions {
     pub no_crt: bool,
     /// If set, disable implicit/default C libraries during executable linking.
     pub no_libc: bool,
+    /// If set, allow unresolved symbols when producing a shared object. Otherwise `--no-undefined`
+    /// is passed so a missing symbol fails the build instead of leaving an unresolved reference.
+    pub allow_undefined_symbols: bool,
     /// Relocation preference (PIC / NoPic / Default).
     pub relocation_preference: RelocationPreference,
     pub lib_location: Option<PathBuf>,
@@ -182,22 +187,71 @@ pub fn compile<T: AsRef<str> + AsRef<OsStr> + Debug>(args: &[T]) -> Result<()> {
     compile_with_pipeline(pipeline)
 }
 
+/// Resolve the build target, folding the separately-parsed `--sysroot` into it.
+///
+/// `--target` and `--sysroot` are independent CLI parameters, and `FromStr for Target`
+/// can only produce a target with no sysroot. Without this merge `Target::get_sysroot()`
+/// is always `None`, so the sysroot reaches neither the driver-linker support probe nor
+/// the real link.
+///
+/// Note that a sysroot is only carried by [`Target::Param`]: with no `--target` the
+/// default [`Target::System`] keeps no sysroot, which is correct for a native build.
+fn resolve_target(params: Option<&CompileParameters>) -> Target {
+    params
+        .and_then(|it| it.target.clone())
+        .unwrap_or_default()
+        .with_sysroot(params.and_then(|it| it.sysroot.clone()))
+}
+
+/// Keeps the backend from folding sibling branch bodies together, which would leave both
+/// bodies below sharing one `call`:
+///
+/// ```text
+/// CASE step OF
+///     0: fb(in := TRUE);
+///     1: fb(in := FALSE);
+/// END_CASE
+/// ```
+///
+/// A block carries one source location, so a folded block is attributed to line 0, neither
+/// body keeps a line-table row, and a breakpoint on either silently binds to another line.
+/// `BranchFolder` merges the shared suffix on every target; on AArch64 and ARM a SimplifyCFG
+/// run in the backend also sinks the bodies into the join block or rewrites the switch into
+/// a lookup table, dropping the bodies outright.
+///
+/// Only `--debug -Onone` needs this: statement locations are emitted, and it is the one
+/// level that pairs an unoptimized IR pipeline with an optimizing machine pipeline (see
+/// `OptimizationLevel::codegen_level`). The higher levels lose the rows in the IR pipeline
+/// regardless and would only pay the code-size cost. The options are process-global, so
+/// every other configuration sets them back to their defaults.
+fn preserve_branch_body_locations(compile_options: &CompileOptions) {
+    let preserve = matches!(compile_options.debug_level, DebugLevel::Full(_))
+        && compile_options.optimization == OptimizationLevel::None;
+    let merge = if preserve { "false" } else { "true" };
+
+    plc_llvm::set_llvm_option("enable-tail-merge", merge);
+    plc_llvm::set_llvm_option("aarch64-enable-atomic-cfg-tidy", merge);
+    plc_llvm::set_llvm_option("arm-atomic-cfg-tidy", merge);
+}
+
 pub fn compile_with_pipeline<T: SourceContainer + Clone + 'static>(
     mut pipeline: BuildPipeline<T>,
 ) -> Result<()> {
     //register participants
     pipeline.register_default_mut_participants();
-    let target = pipeline.compile_parameters.as_ref().and_then(|it| it.target.clone()).unwrap_or_default();
+    let target = resolve_target(pipeline.compile_parameters.as_ref());
+    let compile_options = pipeline.get_compile_options().unwrap();
+    preserve_branch_body_locations(&compile_options);
     let codegen_participant = CodegenParticipant {
-        compile_options: pipeline.get_compile_options().unwrap(),
+        compile_options,
         link_options: pipeline.get_link_options().unwrap(),
         target: target.clone(),
         objects: Arc::new(RwLock::new(GeneratedProject {
             target,
             objects: pipeline.project.get_objects().to_vec(),
         })),
-        got_layout: Default::default(),
         compile_dirs: Default::default(),
+        root: Default::default(),
         libraries: pipeline.project.get_libraries().to_vec(),
     };
     pipeline.register_participant(Box::new(codegen_participant));

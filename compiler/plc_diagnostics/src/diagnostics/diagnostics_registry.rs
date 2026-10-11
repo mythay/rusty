@@ -143,7 +143,7 @@ lazy_static! {
         E039,   Warning,    include_str!("./error_codes/E039.md"),
         E040,   Warning,    include_str!("./error_codes/E040.md"),
         E041,   Error,      include_str!("./error_codes/E041.md"),
-        E042,   Warning,    include_str!("./error_codes/E042.md"), // Assignment to reference
+        E042,   Warning,    include_str!("./error_codes/E042.md"), // TODO: Use me, I'm free
         E043,   Error,      include_str!("./error_codes/E043.md"),
         E044,   Error,      include_str!("./error_codes/E044.md"),
         E045,   Error,      include_str!("./error_codes/E045.md"),
@@ -182,12 +182,12 @@ lazy_static! {
         E078,   Error,      include_str!("./error_codes/E078.md"),
         E079,   Error,      include_str!("./error_codes/E079.md"),
         E080,   Error,      include_str!("./error_codes/E080.md"),
-        E081,   Error,      include_str!("./error_codes/E081.md"),
-        E082,   Error,      include_str!("./error_codes/E082.md"),
-        E083,   Error,      include_str!("./error_codes/E083.md"),
-        E084,   Error,      include_str!("./error_codes/E084.md"),
-        E085,   Error,      include_str!("./error_codes/E085.md"),
-        E086,   Error,      include_str!("./error_codes/E086.md"),
+        E081,   Error,      include_str!("./error_codes/E081.md"),   // Duplicate CFC connector
+        E082,   Error,      include_str!("./error_codes/E082.md"),   // Dangling CFC continuation
+        E083,   Error,      include_str!("./error_codes/E083.md"),   // Unsupported CFC expression
+        E084,   Warning,    include_str!("./error_codes/E084.md"),   // Unconnected CFC element
+        E085,   Error,      include_str!("./error_codes/E085.md"),   // Disconnected CFC return
+        E086,   Error,      include_str!("./error_codes/E086.md"),   // Open CFC connector
         E087,   Error,      include_str!("./error_codes/E087.md"),
         E088,   Error,      include_str!("./error_codes/E088.md"),
         E089,   Error,      include_str!("./error_codes/E089.md"),
@@ -243,6 +243,23 @@ lazy_static! {
         E139,   Error,      include_str!("./error_codes/E139.md"),  // Linker invocation failed (spawn / cmdline)
         E140,   Error,      include_str!("./error_codes/E140.md"),  // ':=' used for an output parameter
         E141,   Error,      include_str!("./error_codes/E141.md"),  // Member access on a non-auto-deref pointer base
+        E142,   Error,      include_str!("./error_codes/E142.md"),  // Undefined CFC jump target
+        E143,   Warning,    include_str!("./error_codes/E143.md"),  // Unused CFC label
+        E144,   Error,      include_str!("./error_codes/E144.md"),  // Duplicate CFC label
+        E145,   Warning,    include_str!("./error_codes/E145.md"),  // Disconnected CFC jump
+        E146,   Error,      include_str!("./error_codes/E146.md"),  // Unknown CFC block type
+        E147,   Error,      include_str!("./error_codes/E147.md"),  // Undeclared CFC block output
+        E148,   Warning,    include_str!("./error_codes/E148.md"),  // Temporal literal overflow or underflow
+        E149,   Error,      include_str!("./error_codes/E149.md"),  // Unresolved generic CFC block output
+        E150,   Warning,    include_str!("./error_codes/E150.md"),  // ABS on an unsigned value has no effect
+        E151,   Error,      include_str!("./error_codes/E151.md"),  // Unary NOT with unsupported operand type
+        E152,   Error,      include_str!("./error_codes/E152.md"),  // Unconnected CFC EN pin
+        E153,   Error,      include_str!("./error_codes/E153.md"),  // CFC ENO cycle
+        E154,   Error,      include_str!("./error_codes/E154.md"),  // Negated CFC reference assignment
+        E155,   Error,      include_str!("./error_codes/E155.md"),  // Duplicate CFC return pin
+        E156,   Error,      include_str!("./error_codes/E156.md"),  // Operator not defined for these operand types
+        E157,   Warning,    include_str!("./error_codes/E157.md"),  // Bare integer combined with a duration
+        E158,   Error,      include_str!("./error_codes/E158.md"),  // CFC execution order 0
     );
 }
 

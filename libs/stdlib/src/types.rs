@@ -16,28 +16,26 @@ macro_rules! define_float_type {
         #[allow(non_snake_case)]
         #[no_mangle]
         pub unsafe extern "C" fn $max_name(size: u32, value: *const $rust_type) -> $rust_type {
-            // Declare array for value
-            let arr = if !value.is_null() {
-                slice::from_raw_parts(value, size as usize)
-            } else {
-                panic!("Null pointer for value");
-            };
+            debug_assert!(!value.is_null() && size > 0, "MAX requires at least one element");
+            if value.is_null() || size == 0 {
+                return <$rust_type>::default();
+            }
 
-            arr.iter().map(|it| *it).reduce(<$rust_type>::max).expect("A max will always exist")
+            let arr = slice::from_raw_parts(value, size as usize);
+            arr.iter().map(|it| *it).reduce(<$rust_type>::max).unwrap_or_default()
         }
         /// # Safety
         /// Dealing with raw pointers
         #[allow(non_snake_case)]
         #[no_mangle]
         pub unsafe extern "C" fn $min_name(size: u32, value: *const $rust_type) -> $rust_type {
-            // Declare array for value
-            let arr = if !value.is_null() {
-                slice::from_raw_parts(value, size as usize)
-            } else {
-                panic!("Null pointer for value");
-            };
+            debug_assert!(!value.is_null() && size > 0, "MIN requires at least one element");
+            if value.is_null() || size == 0 {
+                return <$rust_type>::default();
+            }
 
-            arr.iter().map(|it| *it).reduce(<$rust_type>::min).expect("A max will always exist")
+            let arr = slice::from_raw_parts(value, size as usize);
+            arr.iter().map(|it| *it).reduce(<$rust_type>::min).unwrap_or_default()
         }
 
         //Limit
@@ -58,12 +56,13 @@ macro_rules! define_order_type {
         #[allow(non_snake_case)]
         #[no_mangle]
         pub unsafe extern "C" fn $max_name(size: u32, value: *const $rust_type) -> $rust_type {
-            if !value.is_null() {
-                let arr = slice::from_raw_parts(value, size as usize);
-                *arr.iter().max().expect("A max will always exist")
-            } else {
-                panic!("Null pointer for value");
+            debug_assert!(!value.is_null() && size > 0, "MAX requires at least one element");
+            if value.is_null() || size == 0 {
+                return <$rust_type>::default();
             }
+
+            let arr = slice::from_raw_parts(value, size as usize);
+            arr.iter().max().copied().unwrap_or_default()
         }
         //Min impl
         /// # Safety
@@ -71,12 +70,13 @@ macro_rules! define_order_type {
         #[allow(non_snake_case)]
         #[no_mangle]
         pub unsafe extern "C" fn $min_name(size: u32, value: *const $rust_type) -> $rust_type {
-            if !value.is_null() {
-                let arr = slice::from_raw_parts(value, size as usize);
-                *arr.iter().min().expect("A min will always exist")
-            } else {
-                panic!("Null pointer for value");
+            debug_assert!(!value.is_null() && size > 0, "MIN requires at least one element");
+            if value.is_null() || size == 0 {
+                return <$rust_type>::default();
             }
+
+            let arr = slice::from_raw_parts(value, size as usize);
+            arr.iter().min().copied().unwrap_or_default()
         }
 
         //Limit
@@ -115,10 +115,14 @@ define_int_type!(MAX__DINT, MIN__DINT, LIMIT__DINT, i32);
 define_int_type!(MAX__UDINT, MIN__UDINT, LIMIT__UDINT, u32);
 define_int_type!(MAX__LINT, MIN__LINT, LIMIT__LINT, i64);
 define_int_type!(MAX__ULINT, MIN__ULINT, LIMIT__ULINT, u64);
-define_int_type!(MAX__DATE, MIN__DATE, LIMIT__DATE, i64);
-define_int_type!(MAX__DATE_AND_TIME, MIN__DATE_AND_TIME, LIMIT__DATE_AND_TIME, i64);
-define_int_type!(MAX__TIME, MIN__TIME, LIMIT__TIME, i64);
-define_int_type!(MAX__TIME_OF_DAY, MIN__TIME_OF_DAY, LIMIT__TIME_OF_DAY, i64);
+define_int_type!(MAX__DATE, MIN__DATE, LIMIT__DATE, u32);
+define_int_type!(MAX__DATE_AND_TIME, MIN__DATE_AND_TIME, LIMIT__DATE_AND_TIME, u32);
+define_int_type!(MAX__TIME, MIN__TIME, LIMIT__TIME, u32);
+define_int_type!(MAX__TIME_OF_DAY, MIN__TIME_OF_DAY, LIMIT__TIME_OF_DAY, u32);
+define_int_type!(MAX__LDATE, MIN__LDATE, LIMIT__LDATE, i64);
+define_int_type!(MAX__LDATE_AND_TIME, MIN__LDATE_AND_TIME, LIMIT__LDATE_AND_TIME, i64);
+define_int_type!(MAX__LTIME, MIN__LTIME, LIMIT__LTIME, i64);
+define_int_type!(MAX__LTIME_OF_DAY, MIN__LTIME_OF_DAY, LIMIT__LTIME_OF_DAY, i64);
 //Floats
 define_float_type!(MAX__REAL, MIN__REAL, LIMIT__REAL, f32);
 define_float_type!(MAX__LREAL, MIN__LREAL, LIMIT__LREAL, f64);

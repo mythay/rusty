@@ -1,0 +1,1423 @@
+//! Renders the resolved network into the interface unit's AST body.
+
+use plc_ast::ast::{AstFactory, AstNode, CompilationUnit, DataTypeDeclaration, Variable, VariableBlock};
+use plc_ast::control_statements::{ConditionalBlock, IfStatement};
+use plc_ast::literals::AstLiteral;
+use plc_ast::provider::IdProvider;
+use plc_source::source_location::SourceLocation;
+
+use crate::model::Storage;
+use crate::network::{Argument, Network, Statement};
+use crate::st;
+
+pub struct Transpiler {
+    ids: IdProvider,
+}
+
+impl Transpiler {
+    pub fn new(ids: IdProvider) -> Self {
+        Self { ids }
+    }
+
+    pub fn transpile(mut self, mut unit: CompilationUnit, network: Network) -> CompilationUnit {
+        // Render each statement into the interface-only unit's empty body.
+        let mut statements = Vec::new();
+        for statement in network.statements {
+            statements.push(self.render(statement));
+        }
+
+        if let Some(implementation) = unit.implementations.first_mut() {
+            implementation.statements = statements;
+        }
+
+        // Declare the captured function outputs in their own VAR block.
+        let mut temporaries = Vec::new();
+        for temporary in network.temporaries {
+            let data_type = DataTypeDeclaration::reference(temporary.data_type, temporary.location.clone());
+            temporaries.push(Variable::new(temporary.name, data_type, temporary.location));
+        }
+
+        if let (Some(pou), false) = (unit.pous.first_mut(), temporaries.is_empty()) {
+            pou.variable_blocks.push(VariableBlock::default().with_variables(temporaries));
+        }
+
+        unit
+    }
+
+    fn render(&mut self, statement: Statement) -> AstNode {
+        match statement {
+            Statement::Assignment { sink, source, storage: None } => {
+                AstFactory::create_assignment(sink, source, self.ids.next_id())
+            }
+
+            // A reference-mode sink re-points: it stores the source's address,
+            // `sink REF= source`, instead of assigning the source's value.
+            Statement::Assignment { sink, source, storage: Some(Storage::Reference) } => {
+                AstFactory::create_ref_assignment(sink, source, self.ids.next_id())
+            }
+
+            // A storage-mode sink latches: the source guards a constant store,
+            // `TRUE` for Set, `FALSE` for Reset; nothing is written otherwise.
+            Statement::Assignment { sink, source, storage: Some(storage) } => {
+                let location = sink.location.clone();
+
+                let value = self.boolean(matches!(storage, Storage::Set), &location);
+                let store = AstFactory::create_assignment(sink, value, self.ids.next_id());
+
+                self.guard(source, store, location)
+            }
+            Statement::Return { condition, location } => {
+                AstFactory::create_return_statement(Some(condition), location, self.ids.next_id())
+            }
+            Statement::Jump { condition, target, location } => {
+                // No wired condition lowers to a guard the jump can never pass.
+                let condition = condition.unwrap_or_else(|| self.boolean(false, &location));
+                let target = self.reference(&target, &location);
+
+                AstFactory::create_jump_statement(
+                    Box::new(condition),
+                    Box::new(target),
+                    location,
+                    self.ids.next_id(),
+                )
+            }
+            Statement::Label { name, location } => {
+                AstFactory::create_label_statement(name, location, self.ids.next_id())
+            }
+            Statement::Call { target, arguments, capture, enable, location } => {
+                let operator = self.callee(&target, &location);
+
+                let mut parameters = Vec::new();
+                for argument in arguments {
+                    parameters.push(self.argument(argument, &location));
+                }
+
+                // A bare call carries no parameter list.
+                let parameters = if parameters.is_empty() {
+                    None
+                } else {
+                    Some(AstFactory::create_expression_list(parameters, location.clone(), self.ids.next_id()))
+                };
+
+                let call = AstFactory::create_call_statement(
+                    operator,
+                    parameters,
+                    self.ids.next_id(),
+                    location.clone(),
+                );
+
+                // A captured call assigns the return value to its temporary.
+                let call = match capture {
+                    Some(temporary) => {
+                        let temporary = self.reference(&temporary, &location);
+                        AstFactory::create_assignment(temporary, call, self.ids.next_id())
+                    }
+                    None => call,
+                };
+
+                // The EN guard wraps the whole call, capture included, so a
+                // skipped call leaves the captured temporary untouched.
+                match enable {
+                    Some(condition) => self.guard(condition, call, location),
+                    None => call,
+                }
+            }
+        }
+    }
+
+    // `IF condition THEN body END_IF`; the shape shared by storage-mode
+    // latches and EN guards.
+    fn guard(&mut self, condition: AstNode, body: AstNode, location: SourceLocation) -> AstNode {
+        let statement = IfStatement {
+            blocks: vec![ConditionalBlock { condition: Box::new(condition), body: vec![body] }],
+            else_block: Vec::new(),
+            end_location: location.clone(),
+        };
+
+        AstFactory::create_if_statement(statement, location, self.ids.next_id())
+    }
+
+    fn boolean(&mut self, value: bool, location: &SourceLocation) -> AstNode {
+        AstFactory::create_literal(AstLiteral::Bool(value), location.clone(), self.ids.next_id())
+    }
+
+    fn argument(&mut self, argument: Argument, location: &SourceLocation) -> AstNode {
+        match argument {
+            // `parameter := value`
+            Argument::Input { parameter, value } => {
+                let parameter = self.reference(&parameter, location);
+                AstFactory::create_assignment(parameter, *value, self.ids.next_id())
+            }
+
+            // `parameter => capture`, or an empty `parameter => ` discard.
+            Argument::Output { parameter, capture } => {
+                let parameter = self.reference(&parameter, location);
+                let capture = match capture {
+                    Some(temporary) => self.reference(&temporary, location),
+                    None => AstFactory::create_empty_statement(location.clone(), self.ids.next_id()),
+                };
+
+                AstFactory::create_output_assignment(parameter, capture, self.ids.next_id())
+            }
+
+            // A bare `value`, positioned by pin order.
+            Argument::Variadic { value } => *value,
+        }
+    }
+
+    fn reference(&mut self, name: &str, location: &SourceLocation) -> AstNode {
+        st::parse_expression_at(name, self.ids.clone(), location)
+    }
+
+    // A builtin named by an operator keyword (`AND`, `MOD`, ...) is no ST expression on its own.
+    fn callee(&mut self, name: &str, location: &SourceLocation) -> AstNode {
+        if !st::is_operator_function(name) {
+            return self.reference(name, location);
+        }
+
+        let identifier = AstFactory::create_identifier(name, location, self.ids.next_id());
+        AstFactory::create_member_reference(identifier, None, self.ids.next_id())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    mod variables {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn simple_assignment() {
+            insta::assert_snapshot!(transpile_project("variables/valid/simple_assignment").unwrap(), @r"
+        FUNCTION simple_assignment : INT
+        VAR
+            foo : DINT;
+            bar : DINT;
+        END_VAR
+            bar := foo;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn reciprocal_assignment() {
+            insta::assert_snapshot!(transpile_project("variables/valid/reciprocal_assignment").unwrap(), @r"
+        PROGRAM reciprocal_assignment
+        VAR
+            foo : DINT;
+            bar : DINT;
+        END_VAR
+            bar := foo;
+            foo := bar;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn fan_out() {
+            insta::assert_snapshot!(transpile_project("variables/valid/fan_out").unwrap(), @r"
+        FUNCTION_BLOCK fan_out
+        VAR
+            foo : DINT;
+            bar : DINT;
+            baz : DINT;
+        END_VAR
+            bar := foo;
+            baz := foo;
+        END_FUNCTION_BLOCK");
+        }
+
+        #[test]
+        fn literal_assignment() {
+            insta::assert_snapshot!(transpile_project("variables/valid/literal_assignment").unwrap(), @r"
+        FUNCTION literal_assignment : INT
+        VAR
+            foo : DINT;
+        END_VAR
+            foo := 5;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn unconnected_variables() {
+            insta::assert_snapshot!(transpile_project("variables/valid/unconnected_variables").unwrap(), @r"
+        FUNCTION unconnected_variables : INT
+        VAR
+            foo : DINT;
+            bar : DINT;
+        END_VAR
+            bar := foo;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn negated_source() {
+            insta::assert_snapshot!(transpile_project("variables/valid/negated_source").unwrap(), @r"
+        PROGRAM negated_source
+        VAR
+            foo : BOOL;
+            bar : BOOL;
+        END_VAR
+            bar := NOT foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_sink() {
+            insta::assert_snapshot!(transpile_project("variables/valid/negated_sink").unwrap(), @r"
+        PROGRAM negated_sink
+        VAR
+            foo : BOOL;
+            bar : BOOL;
+        END_VAR
+            bar := NOT foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_both() {
+            insta::assert_snapshot!(transpile_project("variables/valid/negated_both").unwrap(), @r"
+        PROGRAM negated_both
+        VAR
+            foo : BOOL;
+            bar : BOOL;
+        END_VAR
+            bar := NOT NOT foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn storage_set() {
+            insta::assert_snapshot!(transpile_project("variables/valid/storage_set").unwrap(), @r"
+            PROGRAM storage_set
+            VAR
+                a : BOOL;
+                b : BOOL;
+            END_VAR
+                IF a THEN
+                    b := TRUE
+                END_IF;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn storage_reset() {
+            insta::assert_snapshot!(transpile_project("variables/valid/storage_reset").unwrap(), @r"
+            PROGRAM storage_reset
+            VAR
+                a : BOOL;
+                b : BOOL;
+            END_VAR
+                IF a THEN
+                    b := FALSE
+                END_IF;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn storage_negated() {
+            insta::assert_snapshot!(transpile_project("variables/valid/storage_negated").unwrap(), @r"
+            PROGRAM storage_negated
+            VAR
+                a : BOOL;
+                b : BOOL;
+            END_VAR
+                IF a THEN
+                    b := TRUE
+                END_IF;
+                IF NOT a THEN
+                    b := TRUE
+                END_IF;
+                IF NOT a THEN
+                    b := FALSE
+                END_IF;
+                IF NOT NOT a THEN
+                    b := TRUE
+                END_IF;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn storage_reference() {
+            insta::assert_snapshot!(transpile_project("variables/valid/storage_reference").unwrap(), @r"
+            PROGRAM storage_reference
+            VAR
+                a : DINT;
+                b : REFERENCE TO DINT;
+            END_VAR
+                b REF= a;
+            END_PROGRAM
+            ");
+        }
+    }
+
+    mod returns {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn conditional_return() {
+            insta::assert_snapshot!(transpile_project("returns/valid/conditional_return").unwrap(), @r"
+        FUNCTION conditional_return : INT
+        VAR
+            myCondition : BOOL;
+        END_VAR
+            IF myCondition THEN RETURN; END_IF;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn negated_return() {
+            insta::assert_snapshot!(transpile_project("returns/valid/negated_return").unwrap(), @r"
+        FUNCTION negated_return : INT
+        VAR
+            myCondition : BOOL;
+        END_VAR
+            IF NOT myCondition THEN RETURN; END_IF;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn negated_return_source() {
+            insta::assert_snapshot!(transpile_project("returns/valid/negated_return_source").unwrap(), @r"
+        FUNCTION negated_return_source : INT
+        VAR
+            myCondition : BOOL;
+        END_VAR
+            IF NOT myCondition THEN RETURN; END_IF;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn negated_return_both() {
+            insta::assert_snapshot!(transpile_project("returns/valid/negated_return_both").unwrap(), @r"
+        FUNCTION negated_return_both : INT
+        VAR
+            myCondition : BOOL;
+        END_VAR
+            IF NOT NOT myCondition THEN RETURN; END_IF;
+        END_FUNCTION");
+        }
+    }
+
+    mod jumps {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn conditional_jump() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/conditional_jump").unwrap(), @r"
+        PROGRAM conditional_jump
+        VAR
+            x : DINT;
+            y : DINT;
+            myCondition : BOOL;
+        END_VAR
+            IF myCondition THEN GOTO skipAssignment;
+            y := x;
+            LABEL: skipAssignment
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_jump() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/negated_jump").unwrap(), @r"
+        PROGRAM negated_jump
+        VAR
+            x : DINT;
+            y : DINT;
+            myCondition : BOOL;
+        END_VAR
+            IF NOT myCondition THEN GOTO skipAssignment;
+            y := x;
+            LABEL: skipAssignment
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_jump_source() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/negated_jump_source").unwrap(), @r"
+        PROGRAM negated_jump_source
+        VAR
+            x : DINT;
+            y : DINT;
+            myCondition : BOOL;
+        END_VAR
+            IF NOT myCondition THEN GOTO skipAssignment;
+            y := x;
+            LABEL: skipAssignment
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_jump_both() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/negated_jump_both").unwrap(), @r"
+        PROGRAM negated_jump_both
+        VAR
+            x : DINT;
+            y : DINT;
+            myCondition : BOOL;
+        END_VAR
+            IF NOT NOT myCondition THEN GOTO skipAssignment;
+            y := x;
+            LABEL: skipAssignment
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn disconnected_jump() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/disconnected_jump").unwrap(), @r"
+        PROGRAM disconnected_jump
+        VAR
+            x : DINT;
+            y : DINT;
+            myCondition : BOOL;
+        END_VAR
+            IF FALSE THEN GOTO skipAssignment;
+            y := x;
+            LABEL: skipAssignment
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn scrambled() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/scrambled").unwrap(), @r"
+        PROGRAM scrambled
+        VAR
+            g1 : BOOL;
+            g2 : BOOL;
+            g3 : BOOL;
+            x : DINT;
+            a : DINT;
+            b : DINT;
+            c : DINT;
+        END_VAR
+            IF g1 THEN GOTO mid;
+            a := x;
+            IF g2 THEN GOTO end;
+            LABEL: mid
+            b := x;
+            IF g3 THEN GOTO end;
+            c := x;
+            LABEL: end
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn backward_jump() {
+            insta::assert_snapshot!(transpile_project("jumps/valid/backward_jump").unwrap(), @r"
+        PROGRAM backward_jump
+        VAR
+            cond : BOOL;
+            i : DINT;
+            x : DINT;
+        END_VAR
+            LABEL: top
+            x := i;
+            IF cond THEN GOTO top;
+        END_PROGRAM");
+        }
+    }
+
+    mod connectors {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn assignment() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/assignment").unwrap(), @r"
+        PROGRAM assignment
+        VAR
+            foo : DINT;
+            bar : DINT;
+        END_VAR
+            bar := foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn fan_out() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/fan_out").unwrap(), @r"
+        PROGRAM fan_out
+        VAR
+            foo : DINT;
+            bar : DINT;
+            baz : DINT;
+        END_VAR
+            bar := foo;
+            baz := foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn chain() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/chain").unwrap(), @r"
+        PROGRAM chain
+        VAR
+            foo : DINT;
+            bar : DINT;
+        END_VAR
+            bar := foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn unused() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/unused").unwrap(), @r"
+        PROGRAM unused
+        VAR
+            foo : DINT;
+            bar : DINT;
+        END_VAR
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_source() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/negated_source").unwrap(), @r"
+        PROGRAM negated_source
+        VAR
+            foo : BOOL;
+            bar : BOOL;
+        END_VAR
+            bar := NOT foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_sink() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/negated_sink").unwrap(), @r"
+        PROGRAM negated_sink
+        VAR
+            foo : BOOL;
+            bar : BOOL;
+        END_VAR
+            bar := NOT foo;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn negated_both() {
+            insta::assert_snapshot!(transpile_project("connectors/valid/negated_both").unwrap(), @r"
+        PROGRAM negated_both
+        VAR
+            foo : BOOL;
+            bar : BOOL;
+        END_VAR
+            bar := NOT NOT foo;
+        END_PROGRAM");
+        }
+    }
+
+    mod blocks {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn program_call() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_call").unwrap(), @r"
+        PROGRAM program_call
+        VAR
+            countIn : DINT;
+            countOut : DINT;
+        END_VAR
+            counter(in := countIn);
+            countOut := counter.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_feedback() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_feedback").unwrap(), @r"
+        PROGRAM program_feedback
+            counter(in := counter.out);
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_fan_out() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_fan_out").unwrap(), @r"
+        PROGRAM program_fan_out
+        VAR
+            seed : DINT;
+            a : DINT;
+            b : DINT;
+        END_VAR
+            counter(in := seed);
+            a := counter.out;
+            b := counter.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_chain() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_chain").unwrap(), @r"
+        PROGRAM program_chain
+        VAR
+            seed : DINT;
+            result : DINT;
+        END_VAR
+            counter(in := seed);
+            doubler(in := counter.out);
+            result := doubler.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_unordered() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_unordered").unwrap(), @r"
+        PROGRAM program_unordered
+        VAR
+            countIn : DINT;
+            countOut : DINT;
+        END_VAR
+            countOut := counter.out;
+            counter(in := countIn);
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_chain_scrambled() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_chain_scrambled").unwrap(), @r"
+        PROGRAM program_chain_scrambled
+        VAR
+            seed : DINT;
+            result : DINT;
+        END_VAR
+            c(in := b.out);
+            result := c.out;
+            a(in := seed);
+            b(in := a.out);
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_cycle() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_cycle").unwrap(), @r"
+        PROGRAM program_cycle
+            pong(in := ping.out);
+            ping(in := pong.out);
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_straddle() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_straddle").unwrap(), @r"
+        PROGRAM program_straddle
+        VAR
+            seed : DINT;
+            before : DINT;
+            after : DINT;
+        END_VAR
+            before := counter.out;
+            counter(in := seed);
+            after := counter.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_mixed() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_mixed").unwrap(), @r"
+        PROGRAM program_mixed
+        VAR
+            seed : DINT;
+            p : DINT;
+            q : DINT;
+            r : DINT;
+        END_VAR
+            q := p;
+            r := counter.out;
+            counter(in := seed);
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn program_negated() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/program_negated").unwrap(), @r"
+        PROGRAM program_negated
+        VAR
+            localIn : DINT;
+            localInOut : DINT;
+            localOut : DINT;
+        END_VAR
+            program_0(in := NOT localIn, inout := NOT localInOut);
+            localOut := NOT program_0.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn fb_pins() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/fb_pins").unwrap(), @r"
+        PROGRAM fb_pins
+        VAR
+            inst : counter;
+            a1 : DINT;
+            b1 : DINT;
+        END_VAR
+            inst(in := NOT a1);
+            b1 := NOT inst.out;
+        END_PROGRAM");
+        }
+
+        // A function-block block carries `instanceName`, so the call and the
+        // output read run on the instance rather than the (program) type name.
+        #[test]
+        fn fb_call() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/fb_call").unwrap(), @r"
+        PROGRAM fb_call
+        VAR
+            inst : counter;
+            localIn : DINT;
+            localOut : DINT;
+        END_VAR
+            inst(in := localIn);
+            localOut := inst.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn fb_instances() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/fb_instances").unwrap(), @r"
+        PROGRAM fb_instances
+        VAR
+            a : counter;
+            b : counter;
+            seed : DINT;
+            result : DINT;
+        END_VAR
+            a(in := seed);
+            b(in := a.out);
+            result := b.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn fb_feedback() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/fb_feedback").unwrap(), @r"
+        PROGRAM fb_feedback
+        VAR
+            inst : counter;
+        END_VAR
+            inst(in := inst.out);
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn fb_straddle() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/fb_straddle").unwrap(), @r"
+        PROGRAM fb_straddle
+        VAR
+            inst : counter;
+            seed : DINT;
+            before : DINT;
+            after : DINT;
+        END_VAR
+            before := inst.out;
+            inst(in := seed);
+            after := inst.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn action_fb() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/action_fb").unwrap(), @r"
+        PROGRAM action_fb
+        VAR
+            inst : counter;
+            localIn : DINT;
+            localOut : DINT;
+        END_VAR
+            inst.increment(in := localIn);
+            localOut := inst.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn action_program() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/action_program").unwrap(), @r"
+        PROGRAM action_program
+        VAR
+            localIn : DINT;
+            localOut : DINT;
+        END_VAR
+            P.bump(step := localIn);
+            localOut := P.out;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn action_bare() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/action_bare").unwrap(), @r"
+        PROGRAM action_bare
+        VAR
+            inst : counter;
+        END_VAR
+            inst.reset();
+        END_PROGRAM");
+        }
+    }
+
+    mod functions {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn function_void() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_void").unwrap(), @r"
+        PROGRAM function_void
+        VAR
+            localIn : DINT := 3;
+            localOut : DINT;
+        END_VAR
+        VAR
+            __out_out_3 : DINT;
+        END_VAR
+            myVoid(in := localIn, out => __out_out_3);
+            localOut := __out_out_3;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_call() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_call").unwrap(), @r"
+        FUNCTION function_call : INT
+        VAR_INPUT
+            in1 : DINT;
+            in2 : DINT;
+        END_VAR
+        VAR_OUTPUT
+            doubledOut : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+            __out_myAddDoubled_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := in1, in2 := in2, myAddDoubled => __out_myAddDoubled_1);
+            function_call := __out_myAdd_1;
+            doubledOut := __out_myAddDoubled_1;
+        END_FUNCTION");
+        }
+
+        #[test]
+        fn function_return_only() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_return_only").unwrap(), @r"
+        PROGRAM function_return_only
+        VAR
+            a : DINT;
+            b : DINT;
+            sum : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := a, in2 := b, myAddDoubled => );
+            sum := __out_myAdd_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_fan_out() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_fan_out").unwrap(), @r"
+        PROGRAM function_fan_out
+        VAR
+            a : DINT;
+            b : DINT;
+            x : DINT;
+            y : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := a, in2 := b, myAddDoubled => );
+            x := __out_myAdd_1;
+            y := __out_myAdd_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_chain() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_chain").unwrap(), @r"
+        PROGRAM function_chain
+        VAR
+            seed : DINT;
+            k : DINT;
+            result : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+            __out_myAdd_10 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := seed, in2 := k, myAddDoubled => );
+            __out_myAdd_10 := myAdd(in1 := __out_myAdd_1, in2 := k, myAddDoubled => );
+            result := __out_myAdd_10;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_scrambled() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_scrambled").unwrap(), @r"
+        PROGRAM function_scrambled
+        VAR
+            a : DINT;
+            b : DINT;
+            early : DINT;
+            late : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+            __out_myAddDoubled_1 : DINT;
+        END_VAR
+            early := __out_myAdd_1;
+            __out_myAdd_1 := myAdd(in1 := a, in2 := b, myAddDoubled => __out_myAddDoubled_1);
+            late := __out_myAddDoubled_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_feedback() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_feedback").unwrap(), @r"
+        PROGRAM function_feedback
+        VAR
+            seed : DINT;
+            acc : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := __out_myAdd_1, in2 := seed, myAddDoubled => );
+            acc := __out_myAdd_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_negated() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_negated").unwrap(), @r"
+        PROGRAM function_negated
+        VAR
+            a : DINT;
+            b : DINT;
+            r : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := NOT a, in2 := b, myAddDoubled => );
+            r := NOT __out_myAdd_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_pins() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_pins").unwrap(), @r"
+        PROGRAM function_pins
+        VAR
+            a1 : DINT;
+            a2 : DINT;
+            b1 : DINT;
+            b2 : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+            __out_myAddDoubled_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(IN1 := NOT a1, IN2 := a2, myAddDoubled => __out_myAddDoubled_1);
+            b2 := NOT __out_myAddDoubled_1;
+            b1 := NOT __out_myAdd_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_args() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_args").unwrap(), @r"
+        PROGRAM function_args
+        VAR
+            a1 : DINT;
+            a2 : DINT;
+            b1 : DINT;
+            b2 : DINT;
+        END_VAR
+        VAR
+            __out_myAdd_1 : DINT;
+            __out_myAddDoubled_1 : DINT;
+        END_VAR
+            __out_myAdd_1 := myAdd(in1 := NOT NOT a1, in2 := NOT a2, myAddDoubled => __out_myAddDoubled_1);
+            b1 := NOT NOT __out_myAdd_1;
+            b2 := NOT __out_myAddDoubled_1;
+        END_PROGRAM");
+        }
+
+        // Transpiles without a diagnostic; the later validation stage rejects
+        // the negated inout (E031), pinned by the lit test of the same name.
+        #[test]
+        fn function_inout_negated() {
+            insta::assert_snapshot!(transpile_project("blocks/invalid/function_inout_negated").unwrap(), @r"
+        PROGRAM function_inout_negated
+        VAR
+            a1 : DINT;
+            acc1 : DINT;
+            b1 : DINT;
+        END_VAR
+        VAR
+            __out_addInto_1 : DINT;
+        END_VAR
+            __out_addInto_1 := addInto(delta := a1, acc := NOT NOT acc1);
+            b1 := __out_addInto_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_bare() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_bare").unwrap(), @r"
+        PROGRAM function_bare
+        VAR
+            a : DINT;
+            b : DINT;
+        END_VAR
+            myAdd(in1 := a, in2 := b, myAddDoubled => );
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_inout() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_inout").unwrap(), @r"
+        PROGRAM function_inout
+        VAR
+            total : DINT;
+            result : DINT;
+        END_VAR
+        VAR
+            __out_addInto_1 : DINT;
+        END_VAR
+            __out_addInto_1 := addInto(delta := 5, acc := total);
+            result := __out_addInto_1;
+        END_PROGRAM");
+        }
+
+        #[test]
+        fn function_inout_unwired() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/function_inout_unwired").unwrap(), @r"
+        PROGRAM function_inout_unwired
+        VAR
+            result : DINT;
+        END_VAR
+        VAR
+            __out_addInto_1 : DINT;
+        END_VAR
+            __out_addInto_1 := addInto(delta := 5, acc := );
+            result := __out_addInto_1;
+        END_PROGRAM");
+        }
+    }
+
+    mod execution_control {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn enable_fb() {
+            insta::assert_snapshot!(transpile_project("execution_control/valid/enable_fb").unwrap(), @r"
+            PROGRAM enable_fb
+            VAR
+                inst : counter;
+                trigger : BOOL;
+                localIn : DINT := 5;
+                localOut : DINT;
+                done : BOOL;
+            END_VAR
+                IF trigger THEN
+                    inst(in := localIn)
+                END_IF;
+                localOut := inst.out;
+                done := trigger;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn enable_function() {
+            insta::assert_snapshot!(transpile_project("execution_control/valid/enable_function").unwrap(), @r"
+            PROGRAM enable_function
+            VAR
+                trigger : BOOL;
+                a : DINT := 3;
+                b : DINT := 4;
+                sum : DINT;
+                done : BOOL;
+            END_VAR
+            VAR
+                __out_myAdd_7 : DINT;
+            END_VAR
+                IF trigger THEN
+                    __out_myAdd_7 := myAdd(in1 := a, in2 := b, myAddDoubled => )
+                END_IF;
+                sum := __out_myAdd_7;
+                done := trigger;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn enable_generic() {
+            insta::assert_snapshot!(transpile_project("execution_control/valid/enable_generic").unwrap(), @r"
+            PROGRAM enable_generic
+            VAR
+                trigger : BOOL;
+                x : DINT;
+                y : DINT;
+                result : DINT;
+            END_VAR
+            VAR
+                __out_myGenAdd_7 : DINT;
+            END_VAR
+                IF trigger THEN
+                    __out_myGenAdd_7 := myGenAdd(a := x, b := y)
+                END_IF;
+                result := __out_myGenAdd_7;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn enable_from_function() {
+            insta::assert_snapshot!(transpile_project("execution_control/valid/enable_from_function").unwrap(), @r"
+            PROGRAM enable_from_function
+            VAR
+                a : DINT := 20;
+                b : DINT := 4;
+                result : DINT;
+            END_VAR
+            VAR
+                __out_isNonZero_3 : BOOL;
+                __out_safeDiv_7 : DINT;
+            END_VAR
+                __out_isNonZero_3 := isNonZero(val := b);
+                IF __out_isNonZero_3 THEN
+                    __out_safeDiv_7 := safeDiv(dividend := a, divisor := b)
+                END_IF;
+                result := __out_safeDiv_7;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn eno_chain() {
+            insta::assert_snapshot!(transpile_project("execution_control/valid/eno_chain").unwrap(), @r"
+            PROGRAM eno_chain
+            VAR
+                a : counter;
+                b : counter;
+                trigger : BOOL;
+                seed : DINT;
+                result : DINT;
+                done : BOOL;
+            END_VAR
+                IF trigger THEN
+                    a(in := seed)
+                END_IF;
+                IF trigger THEN
+                    b(in := a.out)
+                END_IF;
+                result := b.out;
+                done := trigger;
+            END_PROGRAM
+            ");
+        }
+    }
+
+    mod generics {
+        use crate::test_utils::transpile_project;
+
+        #[test]
+        fn generic_call() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/generic_call").unwrap(), @"
+            FUNCTION generic_call : DINT
+            VAR_INPUT
+                in1 : DINT;
+                in2 : DINT;
+            END_VAR
+            VAR
+                __out_myGenAdd_1 : DINT;
+            END_VAR
+                __out_myGenAdd_1 := myGenAdd(a := in1, b := in2);
+                generic_call := __out_myGenAdd_1;
+            END_FUNCTION
+            ");
+        }
+
+        #[test]
+        fn generic_chain() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/generic_chain").unwrap(), @"
+            PROGRAM generic_chain
+            VAR
+                a : INT;
+                b : INT;
+                c : DINT;
+                result : DINT;
+            END_VAR
+            VAR
+                __out_myGenAdd_1 : INT;
+                __out_myGenAdd_5 : DINT;
+            END_VAR
+                __out_myGenAdd_1 := myGenAdd(a := a, b := b);
+                __out_myGenAdd_5 := myGenAdd(a := __out_myGenAdd_1, b := c);
+                result := __out_myGenAdd_5;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn generic_feedback() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/generic_feedback").unwrap(), @"
+            PROGRAM generic_feedback
+            VAR
+                seed : DINT;
+                acc : DINT;
+            END_VAR
+            VAR
+                __out_myGenAdd_1 : DINT;
+            END_VAR
+                __out_myGenAdd_1 := myGenAdd(a := seed, b := __out_myGenAdd_1);
+                acc := __out_myGenAdd_1;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn generic_output() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/generic_output").unwrap(), @"
+            PROGRAM generic_output
+            VAR
+                x : DINT;
+                y : DINT;
+            END_VAR
+            VAR
+                __out_doubled_1 : DINT;
+            END_VAR
+                myGenOut(a := x, doubled => __out_doubled_1);
+                y := __out_doubled_1;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn variadic_add() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/variadic_add").unwrap(), @"
+            PROGRAM variadic_add
+            VAR
+                x : INT;
+                y : DINT;
+                result : DINT;
+            END_VAR
+            VAR
+                __out_ADD_1 : DINT;
+            END_VAR
+                __out_ADD_1 := ADD(x, y, 5);
+                result := __out_ADD_1;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn mux_call() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/mux_call").unwrap(), @r"
+            PROGRAM mux_call
+            VAR
+                sel : DINT;
+                a : DINT;
+                b : DINT;
+                result : DINT;
+            END_VAR
+            VAR
+                __out_MUX_1 : DINT;
+            END_VAR
+                __out_MUX_1 := MUX(sel, a, b);
+                result := __out_MUX_1;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn operator_functions() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/operator_functions").unwrap(), @r"
+            PROGRAM operator_functions
+            VAR
+                a : BOOL;
+                b : BOOL;
+                c : BOOL;
+                x : DINT;
+                y : DINT;
+                and_result : BOOL;
+                or_result : BOOL;
+                xor_result : BOOL;
+                not_result : BOOL;
+                mod_result : DINT;
+            END_VAR
+            VAR
+                __out_AND_6 : BOOL;
+                __out_OR_8 : BOOL;
+                __out_XOR_10 : BOOL;
+                __out_MOD_12 : DINT;
+                __out_NOT_14 : BOOL;
+            END_VAR
+                __out_AND_6 := AND(a, b, c);
+                __out_OR_8 := OR(a, b);
+                __out_XOR_10 := XOR(a, b);
+                __out_MOD_12 := MOD(IN1 := x, IN2 := y);
+                __out_NOT_14 := NOT(IN := a);
+                and_result := __out_AND_6;
+                or_result := __out_OR_8;
+                xor_result := __out_XOR_10;
+                mod_result := __out_MOD_12;
+                not_result := __out_NOT_14;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn variadic_feedback() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/variadic_feedback").unwrap(), @r"
+            PROGRAM variadic_feedback
+            VAR
+                seed : DINT;
+                acc : DINT;
+            END_VAR
+            VAR
+                __out_ADD_1 : DINT;
+            END_VAR
+                __out_ADD_1 := ADD(__out_ADD_1, seed);
+                acc := __out_ADD_1;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn variadic_unwired() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/variadic_unwired").unwrap(), @"
+            PROGRAM variadic_unwired
+            VAR
+                x : DINT;
+                z : DINT;
+                result : DINT;
+            END_VAR
+            VAR
+                __out_ADD_1 : DINT;
+            END_VAR
+                __out_ADD_1 := ADD(x, z);
+                result := __out_ADD_1;
+            END_PROGRAM
+            ");
+        }
+
+        #[test]
+        fn variadic_negated() {
+            insta::assert_snapshot!(transpile_project("blocks/valid/variadic_negated").unwrap(), @r"
+            PROGRAM variadic_negated
+            VAR
+                a1 : DINT;
+                a2 : DINT;
+                a3 : DINT;
+                b1 : DINT;
+            END_VAR
+            VAR
+                __out_ADD_1 : DINT;
+            END_VAR
+                __out_ADD_1 := ADD(NOT a1, NOT a2, NOT NOT a3);
+                b1 := __out_ADD_1;
+            END_PROGRAM");
+        }
+    }
+}

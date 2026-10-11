@@ -11,10 +11,10 @@ use std::{fmt::Debug, hash::Hash};
 
 use plc_ast::{
     ast::{
-        self, flatten_expression_list, Allocation, Assignment, AstFactory, AstId, AstNode, AstStatement,
-        BinaryExpression, CompilationUnit, DataType, DataTypeDeclaration, DirectAccessType, Identifier,
-        Interface, JumpStatement, Operator, Pou, PouType, ReferenceAccess, ReferenceExpr, TypeNature,
-        UserTypeDeclaration, Variable,
+        self, flatten_expression_list, resolve_argument_slots, Allocation, Assignment, AstFactory, AstId,
+        AstNode, AstStatement, BinaryExpression, CallStatement, CompilationUnit, DataType,
+        DataTypeDeclaration, DirectAccessType, Identifier, Interface, JumpStatement, Operator, Pou, PouType,
+        ReferenceAccess, ReferenceExpr, TypeNature, UserTypeDeclaration, Variable,
     },
     control_statements::{AstControlStatement, ReturnStatement},
     literals::{Array, AstLiteral, StringValue},
@@ -29,9 +29,10 @@ use crate::{
     builtins::{self, BuiltIn},
     index::{ArgumentType, Index, PouIndexEntry, VariableIndexEntry, VariableType},
     typesystem::{
-        self, get_bigger_type, DataTypeInformation, InternalType, StringEncoding, StructSource, BOOL_TYPE,
-        BYTE_TYPE, DATE_AND_TIME_TYPE, DATE_TYPE, DINT_TYPE, DWORD_TYPE, LINT_TYPE, LREAL_TYPE, LWORD_TYPE,
-        REAL_TYPE, TIME_OF_DAY_TYPE, TIME_TYPE, VOID_TYPE, WORD_TYPE,
+        self, get_bigger_type, get_date_time_arithmetic, DataTypeInformation, DateTimeArithmetic,
+        InternalType, StringEncoding, StructSource, BOOL_TYPE, BYTE_TYPE, DATE_AND_TIME_TYPE, DATE_TYPE,
+        DINT_TYPE, DWORD_TYPE, LINT_TYPE, LONG_DATE_AND_TIME_TYPE, LONG_DATE_TYPE, LONG_TIME_OF_DAY_TYPE,
+        LONG_TIME_TYPE, LREAL_TYPE, LWORD_TYPE, REAL_TYPE, TIME_OF_DAY_TYPE, TIME_TYPE, VOID_TYPE, WORD_TYPE,
     },
 };
 use crate::{
@@ -263,6 +264,35 @@ impl TypeAnnotator<'_> {
         self.update_expected_types(self.index.get_type_or_panic(typesystem::BOOL_TYPE), statement);
     }
 
+    /// rewrites `left <operator> right` on a date or time operand into the call of the standard
+    /// library function that carries it out, e.g. `dt + t` into `ADD_DT_TIME(dt, t)`
+    fn visit_date_time_arithmetic(
+        &mut self,
+        ctx: &VisitorContext,
+        statement: &AstNode,
+        function: &str,
+        result_type: &str,
+        swap_operands: bool,
+    ) {
+        let AstStatement::BinaryExpression(BinaryExpression { left, right, .. }) = statement.get_stmt()
+        else {
+            return;
+        };
+        let (first, second) = if swap_operands { (right, left) } else { (left, right) };
+        let call = AstFactory::create_call_to_with_ids(
+            function,
+            vec![first.as_ref().clone(), second.as_ref().clone()],
+            &statement.get_location(),
+            ctx.id_provider.clone(),
+        );
+        // the operands are resolved already, visiting them again repeats the work for every nested operation
+        self.visit_call_operator(&call, ctx);
+        self.annotate_call_statement(&call, ctx);
+        self.update_expected_types(self.index.get_type_or_panic(result_type), &call);
+        self.annotate(statement, StatementAnnotation::ReplacementAst { statement: call });
+        self.update_expected_types(self.index.get_type_or_panic(result_type), statement);
+    }
+
     /// tries to call one of the EQUAL_XXX, LESS_XXX, GREATER_XXX functions for the
     /// given type (of left). The given operator has to be a comparison-operator
     fn create_typed_compare_call_statement(
@@ -298,8 +328,8 @@ impl TypeAnnotator<'_> {
             ))
     }
 
+    /// annotates the arguments of a call, the arguments must be resolved already
     pub fn annotate_arguments(&mut self, operator: &AstNode, arguments_node: &AstNode, ctx: &VisitorContext) {
-        self.visit_statement(ctx, arguments_node);
         let arguments = flatten_expression_list(arguments_node);
 
         let pou_name = {
@@ -323,15 +353,27 @@ impl TypeAnnotator<'_> {
             self.annotate_arguments_positional(&pou_name, operator, arguments)
         };
 
-        self.update_generic_call_statement(generics, &pou_name, operator, arguments_node, ctx.to_owned());
+        // Builtin generics (MUX/SEL/SHL/MOVE/…) are resolved inline by codegen: they have no
+        // monomorphization and none of the scalar-vs-aggregate divergence that motivated the lowering
+        // phase, so their generic resolution (return-type + argument nature/hints) stays here in the
+        // annotator. Non-builtin (user/stdlib) generic calls are monomorphized later by the
+        // `GenericLowerer` lowering phase, which materializes each monomorph as a real `{external}` POU.
+        let is_builtin_generic = matches!(
+            self.annotation_map.get(operator),
+            Some(StatementAnnotation::Function { qualified_name, .. })
+                if crate::builtins::get_builtin(qualified_name).is_some()
+        );
+        if is_builtin_generic {
+            self.update_generic_call_statement(generics, &pou_name, operator, arguments_node, ctx.to_owned());
+        }
     }
 
     /// Annotate call arguments when the caller mixes positional and named args,
     /// e.g. `foo(1, b := 20)` or `foo(a := 10, 2, c := 30)`.
     ///
-    /// The resolution rule matches `generate_function_arguments` in the codegen: named args
-    /// claim their slots first, then positional args fill the remaining slots left-to-right.
-    /// **Both sides must stay in sync** — if this rule changes, update the codegen too.
+    /// Named args claim their slots first, then positional args fill the remaining slots
+    /// left-to-right, surplus positional args bind to the variadic parameter; see
+    /// `resolve_argument_slots`, which the codegen and the validator apply as well.
     ///
     /// Invariant: this is only called when the argument list contains AT LEAST one named and
     /// one positional arg; otherwise `annotate_arguments_named` / `annotate_arguments_positional`
@@ -343,22 +385,9 @@ impl TypeAnnotator<'_> {
     ) -> FxHashMap<String, Vec<String>> {
         let mut generics_candidates = FxHashMap::<String, Vec<String>>::default();
         let parameters = self.index.get_available_parameters(pou_name);
+        let slots = resolve_argument_slots(&arguments, parameters.iter().map(|it| it.get_name()));
 
-        // Slots that named args have already claimed — positional fill skips these.
-        let named_positions: FxHashSet<usize> = arguments
-            .iter()
-            .filter_map(|arg| {
-                let var_name = arg.get_assignment_identifier()?;
-                parameters.iter().position(|p| p.get_name().eq_ignore_ascii_case(var_name))
-            })
-            .collect();
-
-        // Remaining slots in declaration order — consumed by positional args one by one.
-        let positional_positions: Vec<usize> =
-            (0..parameters.len()).filter(|i| !named_positions.contains(i)).collect();
-        let mut positional_cursor = 0;
-
-        for argument in arguments {
+        for (argument, slot) in arguments.into_iter().zip(slots) {
             if let Some(var_name) = argument.get_assignment_identifier() {
                 // Named arg (`x := value` or `x => value`): resolve by name, honouring
                 // inheritance (`find_pou_member_and_depth` walks the supertype chain).
@@ -381,15 +410,8 @@ impl TypeAnnotator<'_> {
                         parameter.get_location_in_parent() as usize,
                     );
                 }
-            } else {
-                // Positional arg: consume the next free slot. Advance the cursor unconditionally
-                // so surplus positionals (beyond the declared params) are simply dropped — the
-                // arity check in the validator (E032) surfaces this as a user-facing error.
-                let pos = positional_positions.get(positional_cursor).copied();
-                positional_cursor += 1;
-                let Some(pos) = pos else { continue };
-
-                let Some(parameter) = parameters.get(pos) else { continue };
+            } else if let Some(parameter) = slot.and_then(|slot| parameters.get(slot)) {
+                // Positional arg: bound to the first slot no name claims.
                 let type_name = parameter.get_type_name();
 
                 if let Some((key, candidate)) = self.get_generic_candidate(type_name, argument) {
@@ -403,7 +425,24 @@ impl TypeAnnotator<'_> {
                         parameter.get_location_in_parent() as usize,
                     );
                 }
+            } else if let Some(vararg) = self.index.get_variadic_member(pou_name) {
+                // Surplus positional arg: bound to the variadic parameter, as in
+                // `annotate_arguments_positional`.
+                if let Some((key, candidate)) = self.get_generic_candidate(vararg.get_type_name(), argument) {
+                    generics_candidates.entry(key.to_string()).or_default().push(candidate.to_string());
+                } else {
+                    let type_name = self.get_vararg_type_name(&argument, vararg);
+                    self.annotate_argument(
+                        pou_name,
+                        argument,
+                        &type_name,
+                        0,
+                        vararg.get_location_in_parent() as usize,
+                    );
+                }
             }
+            // A surplus positional arg of a non-variadic callee binds to nothing; the arity check
+            // in the validator (E032) surfaces this as a user-facing error.
         }
 
         generics_candidates
@@ -509,6 +548,18 @@ impl TypeAnnotator<'_> {
     }
 
     fn get_vararg_type_name(&mut self, argument: &&AstNode, vararg: &VariableIndexEntry) -> String {
+        // Sized variadics (`{sized} T...`) store their arguments in a typed array of the declared
+        // element type, so a numeric argument must keep that exact element type rather than receiving
+        // the C-style default-argument promotion below (which only concerns unsized C-ABI variadics):
+        // promoting e.g. an INT argument to DINT would store a wider value into the narrower array
+        // slot. Only applied for numeric element types — a non-numeric element type keeps the existing
+        // per-argument behaviour so unrelated numeric arguments are unaffected.
+        if vararg.get_varargs().is_some_and(|it| it.is_sized())
+            && self.index.get_effective_type_or_void_by_name(vararg.get_type_name()).is_numerical()
+        {
+            return vararg.get_type_name().to_string();
+        }
+
         // intrinsic type promotion for variadics in order to be compatible with the C standard.
         // see ISO/IEC 9899:1999, 6.5.2.2 Function calls (https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf)
         // or https://en.cppreference.com/w/cpp/language/implicit_conversion#Integral_promotion
@@ -1198,6 +1249,7 @@ impl AnnotationMapImpl {
     pub fn import(&mut self, other: AnnotationMapImpl) {
         self.type_map.extend(other.type_map);
         self.type_hint_map.extend(other.type_hint_map);
+        self.generic_nature_map.extend(other.generic_nature_map);
         self.hidden_function_calls.extend(other.hidden_function_calls);
         self.new_index.import(other.new_index);
     }
@@ -2175,7 +2227,38 @@ impl<'i> TypeAnnotator<'i> {
                     let r_intrinsic_type =
                         self.index.get_intrinsic_type_by_name(right_type.get_name()).get_type_information();
 
-                    if l_intrinsic_type.is_numerical() && r_intrinsic_type.is_numerical() {
+                    // arithmetic with a date or time operand follows its own table
+                    let date_time_arithmetic = if data.operator.is_arithmetic_operator()
+                        && (l_intrinsic_type.is_date_or_time_type()
+                            || r_intrinsic_type.is_date_or_time_type())
+                    {
+                        get_date_time_arithmetic(self.index, left_type, &data.operator, right_type)
+                    } else {
+                        None
+                    };
+
+                    if let Some(DateTimeArithmetic::Call { function, result_type, swap_operands }) =
+                        date_time_arithmetic
+                    {
+                        if self.index.find_pou_implementation(&function).is_some() {
+                            self.visit_date_time_arithmetic(
+                                ctx,
+                                statement,
+                                &function,
+                                result_type,
+                                swap_operands,
+                            );
+                            None
+                        } else {
+                            // the validator reports the missing function, the type is known regardless
+                            Some(result_type.to_string())
+                        }
+                    } else if let Some(DateTimeArithmetic::Plain { result_type, .. }) = date_time_arithmetic {
+                        let result = self.index.get_type_or_panic(result_type);
+                        self.update_expected_types(result, &data.left);
+                        self.update_expected_types(result, &data.right);
+                        Some(result_type.to_string())
+                    } else if l_intrinsic_type.is_numerical() && r_intrinsic_type.is_numerical() {
                         let bigger_type = if l_intrinsic_type.is_bool() && r_intrinsic_type.is_bool() {
                             left_type
                         } else {
@@ -2358,9 +2441,16 @@ impl<'i> TypeAnnotator<'i> {
                     jumps.push(statement.get_id());
                 }
             }
-            AstStatement::AllocationStatement(Allocation { name, reference_type }) => {
-                let qualified_name =
-                    if let Some(pou) = ctx.pou { format!("{}.{}", pou, name) } else { name.to_string() };
+            AstStatement::AllocationStatement(Allocation { name, reference_type, .. }) => {
+                let container = ctx.pou.map(|pou| {
+                    self.index.find_implementation_by_name(pou).map(|it| it.get_type_name()).unwrap_or(pou)
+                });
+
+                let qualified_name = match container {
+                    Some(container) => format!("{container}.{name}"),
+                    None => name.to_string(),
+                };
+
                 self.scopes.enter(Scope::Local(Box::new(VariableIndexEntry::new(
                     name,
                     &qualified_name,
@@ -2651,10 +2741,18 @@ impl<'i> TypeAnnotator<'i> {
     }
 
     fn visit_call_statement(&mut self, statement: &AstNode, ctx: &VisitorContext) {
-        let (operator, parameters_stmt) = if let AstStatement::CallStatement(data, ..) = statement.get_stmt()
+        self.visit_call_operator(statement, ctx);
+        if let AstStatement::CallStatement(CallStatement { operator, parameters: Some(parameters) }) =
+            statement.get_stmt()
         {
-            (data.operator.as_ref(), data.parameters.as_deref())
-        } else {
+            let operator_qualifier = self.get_call_name(operator);
+            self.visit_statement(&ctx.with_lhs(operator_qualifier.as_str()), parameters);
+        }
+        self.annotate_call_statement(statement, ctx);
+    }
+
+    fn visit_call_operator(&mut self, statement: &AstNode, ctx: &VisitorContext) {
+        let AstStatement::CallStatement(CallStatement { operator, .. }) = statement.get_stmt() else {
             unreachable!("Always a call statement");
         };
         // #604 needed for recursive function calls
@@ -2662,13 +2760,18 @@ impl<'i> TypeAnnotator<'i> {
             &ctx.with_resolving_strategy(ResolvingStrategy::call_operator_scopes()),
             operator,
         );
-        let operator_qualifier = self.get_call_name(operator);
-        //Use the context without the is_call =true
-        //TODO why do we start a lhs context here???
-        let ctx = ctx.with_lhs(operator_qualifier.as_str());
-        if let Some(parameters) = parameters_stmt {
-            self.visit_statement(&ctx, parameters);
+    }
+
+    /// annotates a call whose operator and arguments are resolved already
+    fn annotate_call_statement(&mut self, statement: &AstNode, ctx: &VisitorContext) {
+        let (operator, parameters_stmt) = if let AstStatement::CallStatement(data, ..) = statement.get_stmt()
+        {
+            (data.operator.as_ref(), data.parameters.as_deref())
+        } else {
+            unreachable!("Always a call statement");
         };
+        let operator_qualifier = self.get_call_name(operator);
+        let ctx = ctx.with_lhs(operator_qualifier.as_str());
 
         if let Some(annotation) = builtins::get_builtin(&operator_qualifier).and_then(BuiltIn::get_annotation)
         {
@@ -2821,17 +2924,23 @@ impl<'i> TypeAnnotator<'i> {
                     AstLiteral::Integer(value) => {
                         self.annotate(statement, StatementAnnotation::value(get_int_type_name_for(*value)));
                     }
-                    AstLiteral::Time { .. } => {
-                        self.annotate(statement, StatementAnnotation::value(TIME_TYPE))
+                    AstLiteral::Time(value) => {
+                        let type_name = if value.is_long() { LONG_TIME_TYPE } else { TIME_TYPE };
+                        self.annotate(statement, StatementAnnotation::value(type_name))
                     }
-                    AstLiteral::TimeOfDay { .. } => {
-                        self.annotate(statement, StatementAnnotation::value(TIME_OF_DAY_TYPE));
+                    AstLiteral::TimeOfDay(value) => {
+                        let type_name =
+                            if value.is_long() { LONG_TIME_OF_DAY_TYPE } else { TIME_OF_DAY_TYPE };
+                        self.annotate(statement, StatementAnnotation::value(type_name));
                     }
-                    AstLiteral::Date { .. } => {
-                        self.annotate(statement, StatementAnnotation::value(DATE_TYPE));
+                    AstLiteral::Date(value) => {
+                        let type_name = if value.is_long() { LONG_DATE_TYPE } else { DATE_TYPE };
+                        self.annotate(statement, StatementAnnotation::value(type_name));
                     }
-                    AstLiteral::DateAndTime { .. } => {
-                        self.annotate(statement, StatementAnnotation::value(DATE_AND_TIME_TYPE));
+                    AstLiteral::DateAndTime(value) => {
+                        let type_name =
+                            if value.is_long() { LONG_DATE_AND_TIME_TYPE } else { DATE_AND_TIME_TYPE };
+                        self.annotate(statement, StatementAnnotation::value(type_name));
                     }
                     AstLiteral::Real(value) => {
                         // XXX: if we have a float literal in an initializer (lhs) context, we need to see if the context expects a double or float type.
@@ -2904,6 +3013,7 @@ fn register_string_type(index: &mut Index, is_wide: bool, len: usize) -> String 
             information: crate::typesystem::DataTypeInformation::String {
                 encoding: if is_wide { StringEncoding::Utf16 } else { StringEncoding::Utf8 },
                 size: typesystem::TypeSize::LiteralInteger(len as i64 + 1),
+                declared_with_length: true,
             },
             location: SourceLocation::internal(),
             linkage: plc_ast::ast::LinkageType::Internal,

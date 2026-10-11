@@ -20,6 +20,126 @@ FUNCTION TO_TIME__LTIME : TIME
     TO_TIME__LTIME := LTIME_TO_TIME(in);
 END_FUNCTION
 
+FUNCTION TO_TIME__BOOL : TIME
+    VAR_INPUT
+        in : BOOL;
+    END_VAR
+
+    TO_TIME__BOOL := BOOL_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__BYTE : TIME
+    VAR_INPUT
+        in : BYTE;
+    END_VAR
+
+    TO_TIME__BYTE := BYTE_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__WORD : TIME
+    VAR_INPUT
+        in : WORD;
+    END_VAR
+
+    TO_TIME__WORD := WORD_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__DWORD : TIME
+    VAR_INPUT
+        in : DWORD;
+    END_VAR
+
+    TO_TIME__DWORD := DWORD_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__LWORD : TIME
+    VAR_INPUT
+        in : LWORD;
+    END_VAR
+
+    TO_TIME__LWORD := LWORD_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__SINT : TIME
+    VAR_INPUT
+        in : SINT;
+    END_VAR
+
+    TO_TIME__SINT := SINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__USINT : TIME
+    VAR_INPUT
+        in : USINT;
+    END_VAR
+
+    TO_TIME__USINT := USINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__INT : TIME
+    VAR_INPUT
+        in : INT;
+    END_VAR
+
+    TO_TIME__INT := INT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__UINT : TIME
+    VAR_INPUT
+        in : UINT;
+    END_VAR
+
+    TO_TIME__UINT := UINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__DINT : TIME
+    VAR_INPUT
+        in : DINT;
+    END_VAR
+
+    TO_TIME__DINT := DINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__UDINT : TIME
+    VAR_INPUT
+        in : UDINT;
+    END_VAR
+
+    TO_TIME__UDINT := UDINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__LINT : TIME
+    VAR_INPUT
+        in : LINT;
+    END_VAR
+
+    TO_TIME__LINT := LINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__ULINT : TIME
+    VAR_INPUT
+        in : ULINT;
+    END_VAR
+
+    TO_TIME__ULINT := ULINT_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__REAL : TIME
+    VAR_INPUT
+        in : REAL;
+    END_VAR
+
+    TO_TIME__REAL := REAL_TO_TIME(in);
+END_FUNCTION
+
+FUNCTION TO_TIME__LREAL : TIME
+    VAR_INPUT
+        in : LREAL;
+    END_VAR
+
+    TO_TIME__LREAL := LREAL_TO_TIME(in);
+END_FUNCTION
+
 // -----------------------------------------------------------------------------------------------------------
 
 FUNCTION TO_LTIME<T: ANY> : LTIME
@@ -30,7 +150,7 @@ END_FUNCTION
 
 FUNCTION TO_LTIME__LTIME : LTIME
     VAR_INPUT
-        in : T;
+        in : LTIME;
     END_VAR
 
     TO_LTIME__LTIME := in;
@@ -38,10 +158,130 @@ END_FUNCTION
 
 FUNCTION TO_LTIME__TIME : LTIME
     VAR_INPUT
-        in : LTIME;
+        in : TIME;
     END_VAR
 
     TO_LTIME__TIME := TIME_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__BOOL : LTIME
+    VAR_INPUT
+        in : BOOL;
+    END_VAR
+
+    TO_LTIME__BOOL := BOOL_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__BYTE : LTIME
+    VAR_INPUT
+        in : BYTE;
+    END_VAR
+
+    TO_LTIME__BYTE := BYTE_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__WORD : LTIME
+    VAR_INPUT
+        in : WORD;
+    END_VAR
+
+    TO_LTIME__WORD := WORD_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__DWORD : LTIME
+    VAR_INPUT
+        in : DWORD;
+    END_VAR
+
+    TO_LTIME__DWORD := DWORD_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__LWORD : LTIME
+    VAR_INPUT
+        in : LWORD;
+    END_VAR
+
+    TO_LTIME__LWORD := LWORD_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__SINT : LTIME
+    VAR_INPUT
+        in : SINT;
+    END_VAR
+
+    TO_LTIME__SINT := SINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__USINT : LTIME
+    VAR_INPUT
+        in : USINT;
+    END_VAR
+
+    TO_LTIME__USINT := USINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__INT : LTIME
+    VAR_INPUT
+        in : INT;
+    END_VAR
+
+    TO_LTIME__INT := INT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__UINT : LTIME
+    VAR_INPUT
+        in : UINT;
+    END_VAR
+
+    TO_LTIME__UINT := UINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__DINT : LTIME
+    VAR_INPUT
+        in : DINT;
+    END_VAR
+
+    TO_LTIME__DINT := DINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__UDINT : LTIME
+    VAR_INPUT
+        in : UDINT;
+    END_VAR
+
+    TO_LTIME__UDINT := UDINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__LINT : LTIME
+    VAR_INPUT
+        in : LINT;
+    END_VAR
+
+    TO_LTIME__LINT := LINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__ULINT : LTIME
+    VAR_INPUT
+        in : ULINT;
+    END_VAR
+
+    TO_LTIME__ULINT := ULINT_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__REAL : LTIME
+    VAR_INPUT
+        in : REAL;
+    END_VAR
+
+    TO_LTIME__REAL := REAL_TO_LTIME(in);
+END_FUNCTION
+
+FUNCTION TO_LTIME__LREAL : LTIME
+    VAR_INPUT
+        in : LREAL;
+    END_VAR
+
+    TO_LTIME__LREAL := LREAL_TO_LTIME(in);
 END_FUNCTION
 
 // -----------------------------------------------------------------------------------------------------------
@@ -54,10 +294,18 @@ END_FUNCTION
 
 FUNCTION TO_DT__DATE_AND_TIME : DT
     VAR_INPUT
+        in : DT;
+    END_VAR
+
+    TO_DT__DATE_AND_TIME := in;
+END_FUNCTION
+
+FUNCTION TO_DT__LDATE_AND_TIME : DT
+    VAR_INPUT
         in : LDT;
     END_VAR
 
-    TO_DT__DATE_AND_TIME := LDT_TO_DT(in);
+    TO_DT__LDATE_AND_TIME := LDT_TO_DT(in);
 END_FUNCTION
 
 // -----------------------------------------------------------------------------------------------------------
@@ -70,26 +318,42 @@ END_FUNCTION
 
 FUNCTION TO_DATE__DATE_AND_TIME : DATE
     VAR_INPUT
+        in : DT;
+    END_VAR
+
+    TO_DATE__DATE_AND_TIME := DT_TO_DATE(in);
+END_FUNCTION
+
+FUNCTION TO_DATE__LDATE_AND_TIME : DATE
+    VAR_INPUT
         in : LDT;
     END_VAR
 
-    TO_DATE__DATE_AND_TIME := LDT_TO_DATE(in);
+    TO_DATE__LDATE_AND_TIME := LDT_TO_DATE(in);
 END_FUNCTION
 
 // -----------------------------------------------------------------------------------------------------------
 
-FUNCTION TO_LDATE<T: ANY> : DATE
+FUNCTION TO_LDATE<T: ANY> : LDATE
     VAR_INPUT
         in : T;
     END_VAR
 END_FUNCTION
 
-FUNCTION TO_LDATE__DATE_AND_TIME : DATE
+FUNCTION TO_LDATE__DATE_AND_TIME : LDATE
+    VAR_INPUT
+        in : DT;
+    END_VAR
+
+    TO_LDATE__DATE_AND_TIME := DT_TO_LDATE(in);
+END_FUNCTION
+
+FUNCTION TO_LDATE__LDATE_AND_TIME : LDATE
     VAR_INPUT
         in : LDT;
     END_VAR
 
-    TO_LDATE__DATE_AND_TIME := LDT_TO_DATE(in);
+    TO_LDATE__LDATE_AND_TIME := LDATE_AND_TIME_TO_LDATE(in);
 END_FUNCTION
 
 // -----------------------------------------------------------------------------------------------------------
@@ -102,18 +366,34 @@ END_FUNCTION
 
 FUNCTION TO_TOD__DATE_AND_TIME : TOD
     VAR_INPUT
-        in : LDT;
+        in : DT;
     END_VAR
 
     TO_TOD__DATE_AND_TIME := DT_TO_TOD(in);
 END_FUNCTION
 
+FUNCTION TO_TOD__LDATE_AND_TIME : TOD
+    VAR_INPUT
+        in : LDT;
+    END_VAR
+
+    TO_TOD__LDATE_AND_TIME := LDT_TO_TOD(in);
+END_FUNCTION
+
 FUNCTION TO_TOD__TIME_OF_DAY : TOD
+    VAR_INPUT
+        in : TOD;
+    END_VAR
+
+    TO_TOD__TIME_OF_DAY := in;
+END_FUNCTION
+
+FUNCTION TO_TOD__LTIME_OF_DAY : TOD
     VAR_INPUT
         in : LTOD;
     END_VAR
 
-    TO_TOD__TIME_OF_DAY := LTOD_TO_TOD(in);
+    TO_TOD__LTIME_OF_DAY := LTOD_TO_TOD(in);
 END_FUNCTION
 
 // -----------------------------------------------------------------------------------------------------------
@@ -126,10 +406,18 @@ END_FUNCTION
 
 FUNCTION TO_LTOD__DATE_AND_TIME : LTOD
     VAR_INPUT
+        in : DT;
+    END_VAR
+
+    TO_LTOD__DATE_AND_TIME := DT_TO_LTOD(in);
+END_FUNCTION
+
+FUNCTION TO_LTOD__LDATE_AND_TIME : LTOD
+    VAR_INPUT
         in : LDT;
     END_VAR
 
-    TO_LTOD__DATE_AND_TIME := LDT_TO_LTOD(in);
+    TO_LTOD__LDATE_AND_TIME := LDT_TO_LTOD(in);
 END_FUNCTION
 
 FUNCTION TO_LTOD__TIME_OF_DAY : LTOD
@@ -138,6 +426,14 @@ FUNCTION TO_LTOD__TIME_OF_DAY : LTOD
     END_VAR
 
     TO_LTOD__TIME_OF_DAY := TOD_TO_LTOD(in);
+END_FUNCTION
+
+FUNCTION TO_LTOD__LTIME_OF_DAY : LTOD
+    VAR_INPUT
+        in : LTOD;
+    END_VAR
+
+    TO_LTOD__LTIME_OF_DAY := in;
 END_FUNCTION
 
 // -----------------------------------------------------------------------------------------------------------
@@ -154,4 +450,12 @@ FUNCTION TO_LDT__DATE_AND_TIME : LDT
     END_VAR
 
     TO_LDT__DATE_AND_TIME := DT_TO_LDT(in);
+END_FUNCTION
+
+FUNCTION TO_LDT__LDATE_AND_TIME : LDT
+    VAR_INPUT
+        in : LDT;
+    END_VAR
+
+    TO_LDT__LDATE_AND_TIME := in;
 END_FUNCTION

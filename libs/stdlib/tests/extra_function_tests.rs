@@ -486,8 +486,8 @@ fn tod_to_lword_conversion() {
     ]);
     let res: u64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    let time = NaiveTime::from_hms_nano_opt(1, 59, 59, 2567e5 as u32).unwrap();
-    let expected = time.num_seconds_from_midnight() as u64 * 1e9 as u64 + time.nanosecond() as u64;
+    let time = NaiveTime::from_hms_milli_opt(1, 59, 59, 256).unwrap();
+    let expected = time.num_seconds_from_midnight() as u64 * 1000 + u64::from(time.nanosecond() / 1_000_000);
     assert_eq!(expected, res)
 }
 
@@ -536,7 +536,7 @@ fn dt_to_lword_conversion() {
 
     let date = NaiveDate::from_ymd_opt(1999, 12, 31).unwrap();
     let time = NaiveTime::from_hms_micro_opt(1, 59, 59, 256700).unwrap();
-    let expected = NaiveDateTime::new(date, time).and_utc().timestamp_nanos_opt().unwrap() as u64;
+    let expected = NaiveDateTime::new(date, time).and_utc().timestamp() as u64;
     assert_eq!(expected, res)
 }
 
@@ -586,7 +586,7 @@ fn date_to_lword_conversion() {
 
     let date = NaiveDate::from_ymd_opt(1999, 12, 31).unwrap();
     let time = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-    let expected = NaiveDateTime::new(date, time).and_utc().timestamp_nanos_opt().unwrap() as u64;
+    let expected = NaiveDateTime::new(date, time).and_utc().timestamp() as u64;
     assert_eq!(expected, res)
 }
 
@@ -634,8 +634,8 @@ fn time_to_lword_conversion() {
     ]);
     let res: u64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    let time = NaiveTime::from_hms_nano_opt(12, 1, 20, 391e6 as u32 + 10).unwrap();
-    let expected = time.num_seconds_from_midnight() as u64 * 1e9 as u64 + time.nanosecond() as u64;
+    let time = NaiveTime::from_hms_milli_opt(12, 1, 20, 391).unwrap();
+    let expected = time.num_seconds_from_midnight() as u64 * 1000 + u64::from(time.nanosecond() / 1_000_000);
     assert_eq!(expected, res)
 }
 
@@ -855,8 +855,8 @@ fn time_to_lint_conversion() {
 
     let res: i64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    let time = NaiveTime::from_hms_nano_opt(12, 1, 20, 391e6 as u32 + 10).unwrap();
-    let expected = time.num_seconds_from_midnight() as i64 * 1e9 as i64 + time.nanosecond() as i64;
+    let time = NaiveTime::from_hms_milli_opt(12, 1, 20, 391).unwrap();
+    let expected = time.num_seconds_from_midnight() as i64 * 1000 + i64::from(time.nanosecond() / 1_000_000);
     assert_eq!(expected, res)
 }
 
@@ -904,8 +904,8 @@ fn tod_to_lint_conversion() {
     ]);
     let res: i64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    let time = NaiveTime::from_hms_nano_opt(1, 59, 59, 2567e5 as u32).unwrap();
-    let expected = time.num_seconds_from_midnight() as i64 * 1e9 as i64 + time.nanosecond() as i64;
+    let time = NaiveTime::from_hms_milli_opt(1, 59, 59, 256).unwrap();
+    let expected = time.num_seconds_from_midnight() as i64 * 1000 + i64::from(time.nanosecond() / 1_000_000);
     assert_eq!(expected, res)
 }
 
@@ -954,7 +954,7 @@ fn date_to_lint_conversion() {
 
     let date = NaiveDate::from_ymd_opt(1999, 12, 31).unwrap();
     let time = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-    let expected = NaiveDateTime::new(date, time).and_utc().timestamp_nanos_opt().unwrap() as u64;
+    let expected = NaiveDateTime::new(date, time).and_utc().timestamp() as u64;
     assert_eq!(expected, res)
 }
 
@@ -1004,7 +1004,7 @@ fn dt_to_lint_conversion() {
 
     let naivedatetime_utc = NaiveDate::from_ymd_opt(2000, 1, 12).unwrap().and_hms_opt(23, 23, 0).unwrap();
     let datetime_utc = TimeZone::from_utc_datetime(&Utc, &naivedatetime_utc);
-    let expected = datetime_utc.timestamp_nanos_opt().unwrap();
+    let expected = datetime_utc.timestamp();
     assert_eq!(expected, res)
 }
 
@@ -1054,8 +1054,8 @@ fn time_to_ulint_conversion() {
 
     let res: u64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    let time = NaiveTime::from_hms_nano_opt(12, 1, 20, 391e6 as u32 + 10).unwrap();
-    let expected = time.num_seconds_from_midnight() as u64 * 1e9 as u64 + time.nanosecond() as u64;
+    let time = NaiveTime::from_hms_milli_opt(12, 1, 20, 391).unwrap();
+    let expected = time.num_seconds_from_midnight() as u64 * 1000 + u64::from(time.nanosecond() / 1_000_000);
     assert_eq!(expected, res)
 }
 
@@ -1103,8 +1103,8 @@ fn tod_to_ulint_conversion() {
     ]);
     let res: u64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    let time = NaiveTime::from_hms_nano_opt(1, 59, 59, 2567e5 as u32).unwrap();
-    let expected = time.num_seconds_from_midnight() as u64 * 1e9 as u64 + time.nanosecond() as u64;
+    let time = NaiveTime::from_hms_milli_opt(1, 59, 59, 256).unwrap();
+    let expected = time.num_seconds_from_midnight() as u64 * 1000 + u64::from(time.nanosecond() / 1_000_000);
     assert_eq!(expected, res)
 }
 
@@ -1153,7 +1153,7 @@ fn date_to_ulint_conversion() {
 
     let date = NaiveDate::from_ymd_opt(1999, 12, 31).unwrap();
     let time = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-    let expected = NaiveDateTime::new(date, time).and_utc().timestamp_nanos_opt().unwrap() as u64;
+    let expected = NaiveDateTime::new(date, time).and_utc().timestamp() as u64;
     assert_eq!(expected, res)
 }
 
@@ -1203,7 +1203,7 @@ fn dt_to_ulint_conversion() {
 
     let naivedatetime_utc = NaiveDate::from_ymd_opt(2000, 1, 12).unwrap().and_hms_opt(23, 23, 0).unwrap();
     let datetime_utc = TimeZone::from_utc_datetime(&Utc, &naivedatetime_utc);
-    let expected = datetime_utc.timestamp_nanos_opt().unwrap() as u64;
+    let expected = datetime_utc.timestamp() as u64;
     assert_eq!(expected, res)
 }
 
@@ -1432,7 +1432,7 @@ fn ltime_to_lreal_conversion() {
     ]);
     let res: f64 = compile_and_run_no_params(vec![src.into()], includes);
 
-    assert_almost_eq!(9.3784005e13, res, 1e7);
+    assert_almost_eq!(9.3784005e7, res, 1e1);
 }
 
 // x to ltime
@@ -1440,11 +1440,11 @@ fn ltime_to_lreal_conversion() {
 #[test]
 fn lword_to_ltime_conversion() {
     let src = r#"
-    FUNCTION main : TIME
+    FUNCTION main : LTIME
     VAR
         lw : LWORD := 93784005005005;
     END_VAR
-        main := LWORD_TO_TIME(lw);
+        main := LWORD_TO_LTIME(lw);
     END_FUNCTION
     "#;
 
@@ -1486,11 +1486,11 @@ fn lreal_to_ltime_conversion() {
 #[test]
 fn lword_to_ldate_conversion() {
     let src = r#"
-    FUNCTION main : DATE
+    FUNCTION main : LDATE
     VAR
         lw : LWORD := 123456789000;
     END_VAR
-        main := LWORD_TO_DATE(lw);
+        main := LWORD_TO_LDATE(lw);
     END_FUNCTION
     "#;
 
@@ -1509,11 +1509,11 @@ fn lword_to_ldate_conversion() {
 #[test]
 fn ulint_to_ldate_conversion() {
     let src = r#"
-    FUNCTION main : DATE
+    FUNCTION main : LDATE
     VAR
         ul : ULINT := 1669244400;
     END_VAR
-        main := ULINT_TO_DATE(ul);
+        main := ULINT_TO_LDATE(ul);
     END_FUNCTION
     "#;
 
@@ -1532,11 +1532,11 @@ fn ulint_to_ldate_conversion() {
 fn u64_to_ldate_signed_overflow() {
     // same behaviour for LWORD and ULINT
     let src = r#"
-    FUNCTION main : DATE
+    FUNCTION main : LDATE
     VAR
         ul : ULINT := 9_223_372_036_854_775_807 + 1; //i64::MAX + 1
     END_VAR
-        main := ULINT_TO_DATE(ul);
+        main := ULINT_TO_LDATE(ul);
     END_FUNCTION
     "#;
 
@@ -1554,11 +1554,11 @@ fn u64_to_ldate_signed_overflow() {
 #[test]
 fn ulint_to_dt_conversion() {
     let src = r#"
-    FUNCTION main : DT
+    FUNCTION main : LDT
     VAR
         ul : ULINT := 1669244400000000;
     END_VAR
-        main := ULINT_TO_DT(ul);
+        main := ULINT_TO_LDT(ul);
     END_FUNCTION
     "#;
 
@@ -1577,11 +1577,11 @@ fn ulint_to_dt_conversion() {
 #[test]
 fn lword_to_ltod_conversion() {
     let src = r#"
-    FUNCTION main : TOD
+    FUNCTION main : LTOD
     VAR
         ul : LWORD := 1669244400000000123;
     END_VAR
-        main := LWORD_TO_TOD(ul);
+        main := LWORD_TO_LTOD(ul);
     END_FUNCTION
     "#;
 
@@ -1600,11 +1600,11 @@ fn lword_to_ltod_conversion() {
 #[test]
 fn lint_to_ltod_conversion() {
     let src = r#"
-    FUNCTION main : TOD
+    FUNCTION main : LTOD
     VAR
         l : LINT := 1669244400000000123;
     END_VAR
-        main := LINT_TO_TOD(l);
+        main := LINT_TO_LTOD(l);
     END_FUNCTION
     "#;
 
@@ -1685,6 +1685,42 @@ fn test_time() {
 
     assert!(module.mock_time_set_u32(23 * 3600 + 59 * 60 + 30));
     let now = module.run::<_, i64>("main", &mut MainType);
+    let expected = (23 * 3600 + 59 * 60 + 30) * 1000;
+    assert_eq!(expected, now);
+
+    assert!(module.mock_time_advance_u32(29));
+    let later = module.run::<_, i64>("main", &mut MainType);
+    let expected = (23 * 3600 + 59 * 60 + 59) * 1000;
+    assert_eq!(expected, later);
+
+    assert!(module.mock_time_advance_u32(2));
+    let new_day = module.run::<_, i64>("main", &mut MainType);
+    let expected = 1000;
+    assert_eq!(expected, new_day);
+}
+
+#[test]
+fn test_ltime() {
+    #[derive(Default)]
+    struct MainType;
+
+    let src = r#"
+    FUNCTION main : LTIME
+        main := LTIME();
+    END_FUNCTION
+    "#;
+
+    let includes = get_includes(&[
+        "string_functions.st",
+        "string_conversion.st",
+        "extra_functions.st",
+        "numerical_functions.st",
+    ]);
+    let context = CodegenContext::create();
+    let module = compile_and_load(&context, vec![src.into()], includes);
+
+    assert!(module.mock_time_set_u32(23 * 3600 + 59 * 60 + 30));
+    let now = module.run::<_, i64>("main", &mut MainType);
     let expected = (23 * 3600 + 59 * 60 + 30) * 1e9 as i64 + 100;
     assert_eq!(expected, now);
 
@@ -1718,7 +1754,7 @@ fn dt_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01-01:10:00";
+    let expected = "DT#1970-01-01-01:10:00";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -1743,7 +1779,7 @@ fn dt_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01-01:10:00";
+    let expected = "DT#1970-01-01-01:10:00";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -1769,7 +1805,7 @@ fn date_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01";
+    let expected = "D#1970-01-01";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -1794,7 +1830,7 @@ fn date_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01";
+    let expected = "D#1970-01-01";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -1820,7 +1856,7 @@ fn time_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "6d2m123ms456us789ns";
+    let expected = "T#6d2m123ms";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -1845,7 +1881,7 @@ fn time_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "6d3h2m9ns";
+    let expected = "T#6d3h2m";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -1871,7 +1907,7 @@ fn tod_ltod_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "15:36:55.123";
+    let expected = "TOD#15:36:55.123";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -1896,7 +1932,7 @@ fn tod_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "15:36:55.123";
+    let expected = "TOD#15:36:55.123";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -1922,7 +1958,7 @@ fn ldt_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01-01:10:00";
+    let expected = "LDT#1970-01-01-01:10:00";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -1947,7 +1983,7 @@ fn ldt_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01-01:10:00";
+    let expected = "LDT#1970-01-01-01:10:00";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -1973,7 +2009,7 @@ fn ldate_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01";
+    let expected = "LDATE#1970-01-01";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -1998,7 +2034,7 @@ fn ldate_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "1970-01-01";
+    let expected = "LDATE#1970-01-01";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -2024,7 +2060,7 @@ fn ltime_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "6d3h2m9ns";
+    let expected = "LTIME#6d3h2m9ns";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -2049,7 +2085,7 @@ fn ltime_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "6d3h2m9ns";
+    let expected = "LTIME#6d3h2m9ns";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');
@@ -2075,7 +2111,7 @@ fn ltod_to_string_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "15:36:55.123";
+    let expected = "LTOD#15:36:55.123";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let res = unsafe { std::str::from_utf8_unchecked(&maintype.s) }.trim_end_matches('\0');
     assert_eq!(expected, res);
@@ -2100,7 +2136,7 @@ fn ltod_to_wstring_conversion() {
         "numerical_functions.st",
     ]);
 
-    let expected = "15:36:55.123";
+    let expected = "LTOD#15:36:55.123";
     let _: i32 = compile_and_run(vec![src.into()], includes, &mut maintype);
     let str = String::from_utf16_lossy(&maintype.s);
     let res = str.trim_end_matches('\0');

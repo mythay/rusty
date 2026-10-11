@@ -5,8 +5,9 @@ use plc_ast::ast::Assignment;
 use plc_ast::control_statements::ForLoopStatement;
 use plc_ast::{
     ast::{
-        flatten_expression_list, AstNode, AstStatement, BinaryExpression, CallStatement, DirectAccess,
-        DirectAccessType, JumpStatement, Operator, ReferenceAccess, UnaryExpression,
+        flatten_expression_list, resolve_argument_slots, AstNode, AstStatement, BinaryExpression,
+        CallStatement, DirectAccess, DirectAccessType, JumpStatement, Operator, ReferenceAccess, TypeNature,
+        UnaryExpression,
     },
     control_statements::{AstControlStatement, ConditionalBlock},
     literals::{Array, AstLiteral, StringValue},
@@ -26,8 +27,9 @@ use crate::{
     index::{ArgumentType, Index, PouIndexEntry, VariableIndexEntry, VariableType},
     resolver::{const_evaluator, AnnotationMap, AutoDerefType, StatementAnnotation},
     typesystem::{
-        self, get_equals_function_name_for, get_literal_actual_signed_type_name, DataType,
-        DataTypeInformation, Dimension, StructSource, BOOL_TYPE, POINTER_SIZE,
+        self, get_date_time_arithmetic, get_equals_function_name_for, get_literal_actual_signed_type_name,
+        DataType, DataTypeInformation, DateTimeArithmetic, Dimension, StructSource, BOOL_TYPE,
+        LONG_TIME_TYPE, POINTER_SIZE,
     },
 };
 
@@ -58,6 +60,53 @@ pub fn visit_statement<T: AnnotationMap>(
         // AstStatement::LiteralReal { value, location, id } => (),
         // AstStatement::LiteralBool { value, location, id } => (),
         // AstStatement::LiteralString { value, is_wide, location, id } => (),
+        AstStatement::Literal(AstLiteral::Date(date)) => {
+            validate_temporal_literal_bounds(
+                validator,
+                date.value().map_err(|_| BoundError::OutOfRange),
+                date.is_long(),
+                if date.is_long() { "LDATE" } else { "DATE" },
+                1_000_000_000,
+                &statement.location,
+            );
+        }
+        AstStatement::Literal(AstLiteral::DateAndTime(date_time)) => {
+            validate_temporal_literal_bounds(
+                validator,
+                date_time.value().map_err(|_| BoundError::OutOfRange),
+                date_time.is_long(),
+                if date_time.is_long() { "LDATE_AND_TIME" } else { "DATE_AND_TIME" },
+                1_000_000_000,
+                &statement.location,
+            );
+        }
+        AstStatement::Literal(AstLiteral::TimeOfDay(time_of_day)) => {
+            validate_temporal_literal_bounds(
+                validator,
+                time_of_day.value().map_err(|_| BoundError::OutOfRange),
+                time_of_day.is_long(),
+                if time_of_day.is_long() { "LTIME_OF_DAY" } else { "TIME_OF_DAY" },
+                1_000_000,
+                &statement.location,
+            );
+        }
+        AstStatement::Literal(AstLiteral::Time(time)) => {
+            let lit_value = time.value().map_err(|_| {
+                if time.is_negative() {
+                    BoundError::Underflow
+                } else {
+                    BoundError::Overflow
+                }
+            });
+            validate_temporal_literal_bounds(
+                validator,
+                lit_value,
+                time.is_long(),
+                if time.is_long() { "LTIME" } else { "TIME" },
+                1_000_000,
+                &statement.location,
+            );
+        }
         AstStatement::Literal(AstLiteral::Array(Array { elements: Some(elements) })) => {
             visit_statement(validator, elements.as_ref(), context);
         }
@@ -70,6 +119,7 @@ pub fn visit_statement<T: AnnotationMap>(
             }
 
             validate_reference_expression(&data.access, validator, context, statement, &data.base);
+            validate_in_out_variable_access(validator, statement, data.base.as_deref(), context);
         }
         AstStatement::BinaryExpression(data) => {
             visit_all_statements!(validator, context, &data.left, &data.right);
@@ -77,6 +127,7 @@ pub fn visit_statement<T: AnnotationMap>(
         }
         AstStatement::UnaryExpression(data) => {
             visit_statement(validator, &data.value, context);
+            validate_unary_expression(validator, statement, &data.operator, &data.value, context);
         }
         AstStatement::ExpressionList(expressions) => {
             expressions.iter().for_each(|element| visit_statement(validator, element, context))
@@ -88,7 +139,10 @@ pub fn visit_statement<T: AnnotationMap>(
             visit_statement(validator, &data.left, context);
             visit_statement(validator, &data.right, context);
 
-            validate_assignment(validator, &data.right, Some(&data.left), &statement.location, context);
+            // lowered copies of variable initializers are validated at their declaration
+            if !statement.location.is_internal() {
+                validate_assignment(validator, &data.right, Some(&data.left), &statement.location, context);
+            }
             validate_array_assignment(validator, context, statement);
         }
         AstStatement::OutputAssignment(data) => {
@@ -178,6 +232,58 @@ pub fn visit_statement<T: AnnotationMap>(
         _ => {}
     }
     validate_type_nature(validator, statement, context);
+}
+
+enum BoundError {
+    Overflow,
+    Underflow,
+    OutOfRange,
+}
+
+fn validate_temporal_literal_bounds(
+    validator: &mut Validator,
+    literal_value: Result<i64, BoundError>,
+    is_long: bool,
+    literal_name: &str,
+    short_unit_divisor: i64,
+    location: &SourceLocation,
+) {
+    fn emit_warning(
+        validator: &mut Validator,
+        literal_name: &str,
+        kind: BoundError,
+        location: &SourceLocation,
+    ) {
+        let msg = match kind {
+            BoundError::Overflow => "overflow detected",
+            BoundError::Underflow => "underflow detected",
+            BoundError::OutOfRange => "out-of-range detected",
+        };
+        validator.push_diagnostic(
+            Diagnostic::new(format!("{literal_name} literal {msg}"))
+                .with_error_code("E148")
+                .with_location(location),
+        );
+    }
+
+    let value = match literal_value {
+        Ok(value) => value,
+        Err(kind) => {
+            emit_warning(validator, literal_name, kind, location);
+            return;
+        }
+    };
+
+    if is_long {
+        return;
+    }
+
+    let short_units = value / short_unit_divisor;
+    if short_units < 0 {
+        emit_warning(validator, literal_name, BoundError::Underflow, location);
+    } else if short_units > u32::MAX as i64 {
+        emit_warning(validator, literal_name, BoundError::Overflow, location);
+    }
 }
 
 fn validate_reference_expression<T: AnnotationMap>(
@@ -507,6 +613,13 @@ fn validate_cast_literal<T: AnnotationMap>(
             .with_error_code("E061")
             .with_location(location),
         )
+    } else if matches!(literal, AstLiteral::Bool(_)) && !cast_type.is_bool() {
+        // a BOOL literal is no numeric value, e.g. DINT#TRUE
+        validator.push_diagnostic(incompatible_literal_cast(
+            cast_type.get_name(),
+            literal.get_literal_value().as_str(),
+            location.clone(),
+        ));
     } else if cast_type.is_date_or_time_type() || literal_type.is_date_or_time_type() {
         validator.push_diagnostic(incompatible_literal_cast(
             cast_type.get_name(),
@@ -933,9 +1046,9 @@ fn visit_binary_expression<T: AnnotationMap>(
             // check for the = operator
             validate_binary_expression(validator, statement, &Operator::Equal, left, right, context);
         }
-        Operator::Division => {
+        Operator::Division | Operator::Modulo => {
             validate_binary_expression(validator, statement, operator, left, right, context);
-            validate_zero_diviser(context, validator, right, &statement.location);
+            validate_zero_diviser(validator, context.annotations, context.index, right, &statement.location);
         }
         _ => validate_binary_expression(validator, statement, operator, left, right, context),
     }
@@ -951,8 +1064,30 @@ fn validate_binary_expression<T: AnnotationMap>(
     right: &AstNode,
     context: &ValidationContext<T>,
 ) {
-    let left_type = context.annotations.get_type_or_void(left, context.index).get_type_information();
-    let right_type = context.annotations.get_type_or_void(right, context.index).get_type_information();
+    let left_data_type = context.annotations.get_type_or_void(left, context.index);
+    let right_data_type = context.annotations.get_type_or_void(right, context.index);
+    let left_type = left_data_type.get_type_information();
+    let right_type = right_data_type.get_type_information();
+
+    // arithmetic with a date or time operand follows its own table
+    let involves_date_or_time =
+        context.index.get_intrinsic_type_information(left_type).is_date_or_time_type()
+            || context.index.get_intrinsic_type_information(right_type).is_date_or_time_type();
+    if operator.is_arithmetic_operator()
+        && involves_date_or_time
+        && !left_type.is_void()
+        && !right_type.is_void()
+    {
+        validate_date_time_arithmetic(
+            validator,
+            context.index,
+            left_data_type,
+            operator,
+            right_data_type,
+            &statement.get_location(),
+        );
+        return;
+    }
 
     // if the type is a subrange, check if the intrinsic type is numerical
     let is_numerical = context.index.get_intrinsic_type_information(left_type).is_numerical();
@@ -973,6 +1108,81 @@ fn validate_binary_expression<T: AnnotationMap>(
             );
         }
     }
+}
+
+/// Validates `left <operator> right` for a date or time operand and returns the type of the
+/// result. A combination the standard does not define is E156, a defined one needs its standard
+/// library function (E073), and a duration combined with a bare integer is accepted with E157.
+pub fn validate_date_time_arithmetic<'i>(
+    validator: &mut Validator,
+    index: &'i Index,
+    left: &DataType,
+    operator: &Operator,
+    right: &DataType,
+    location: &SourceLocation,
+) -> Option<&'i DataType> {
+    let left_name = validator.get_type_name_or_slice(left);
+    let right_name = validator.get_type_name_or_slice(right);
+    let Some(arithmetic) = get_date_time_arithmetic(index, left, operator, right) else {
+        validator.push_diagnostic(
+            Diagnostic::new(format!(
+                "Operator `{operator}` is not defined for `{left_name}` and `{right_name}`"
+            ))
+            .with_error_code("E156")
+            .with_location(location),
+        );
+        return None;
+    };
+
+    match &arithmetic {
+        DateTimeArithmetic::Call { function, .. } if index.find_pou_implementation(function).is_none() => {
+            validator.push_diagnostic(
+                Diagnostic::new(format!(
+                    "Missing function `{function}` for `{left_name} {operator} {right_name}`"
+                ))
+                .with_error_code("E073")
+                .with_location(location),
+            );
+        }
+        DateTimeArithmetic::Plain { result_type, bare_number: true } => {
+            let unit = if *result_type == LONG_TIME_TYPE { "nanoseconds" } else { "milliseconds" };
+            validator.push_diagnostic(
+                Diagnostic::new(format!(
+                    "The integer operand of `{operator}` has no unit and is read as {unit} of `{result_type}`"
+                ))
+                .with_error_code("E157")
+                .with_location(location),
+            );
+        }
+        _ => {}
+    }
+
+    index.find_effective_type_by_name(arithmetic.result_type())
+}
+
+fn validate_unary_expression<T: AnnotationMap>(
+    validator: &mut Validator,
+    statement: &AstNode,
+    operator: &Operator,
+    value: &AstNode,
+    context: &ValidationContext<T>,
+) {
+    if !matches!(operator, Operator::Not) {
+        return;
+    }
+
+    let kind = context.annotations.get_type_or_void(value, context.index);
+    let kind_info = kind.get_type_information();
+    if kind.is_bit() || kind_info.is_int() {
+        return;
+    }
+
+    let slice = validator.get_type_name_or_slice(kind);
+    validator.push_diagnostic(
+        Diagnostic::new(format!("Unary `NOT` requires a bit or integer operand, got `{slice}`"))
+            .with_error_code("E151")
+            .with_location(statement),
+    );
 }
 
 fn compare_function_exists<T: AnnotationMap>(
@@ -1024,33 +1234,146 @@ fn compare_function_exists<T: AnnotationMap>(
 }
 
 /// Validates if an argument can be passed to a function with [`VariableType::Output`] and
-/// [`VariableType::InOut`] parameter types by checking if the argument is a reference (e.g. `foo(x)`) or
-/// an assignment (e.g. `foo(x := y)`, `foo(x => y)`). If neither is the case a diagnostic is generated.
-fn validate_call_by_ref(validator: &mut Validator, param: &VariableIndexEntry, arg: &AstNode) {
+/// [`VariableType::InOut`] and `REFERENCE TO` parameter types by checking if the argument is a
+/// reference (e.g. `foo(x)`) or an assignment (e.g. `foo(x := y)`, `foo(x => y)`). If neither is
+/// the case a diagnostic is generated.
+fn validate_call_by_ref<T: AnnotationMap>(
+    validator: &mut Validator,
+    context: &ValidationContext<T>,
+    param: &VariableIndexEntry,
+    arg: &AstNode,
+) {
     let ty = param.argument_type.get_inner();
-    if !matches!(ty, VariableType::Output | VariableType::InOut) {
+    let param_is_reference_to =
+        context.index.find_effective_type_info(param.get_type_name()).is_some_and(|it| it.is_reference_to());
+    if !(matches!(ty, VariableType::Output | VariableType::InOut) || param_is_reference_to) {
         return;
     }
 
     match (arg.can_be_assigned_to(), arg.get_stmt()) {
-        (true, _) => (),
+        // By-ref parameters need write access to their argument
+        (true, _) => {
+            if let Some(StatementAnnotation::Variable { constant: true, qualified_name, .. }) =
+                context.annotations.get(arg)
+            {
+                validator.push_diagnostic(
+                    Diagnostic::new(format!(
+                        "Parameter {} is passed by reference and needs a variable with write access, but '{qualified_name}' is constant",
+                        param.get_name()
+                    ))
+                    .with_error_code("E031")
+                    .with_location(arg),
+                );
+            }
+        }
 
         // Output assignments are optional, e.g. `foo(bar => )` is considered valid
         (false, AstStatement::EmptyStatement(_)) if matches!(ty, VariableType::Output) => (),
 
         (false, AstStatement::Assignment(data) | AstStatement::OutputAssignment(data)) => {
-            validate_call_by_ref(validator, param, &data.right);
+            validate_call_by_ref(validator, context, param, &data.right);
         }
 
         _ => validator.push_diagnostic(
             Diagnostic::new(format!(
                 "Expected a reference for parameter {} because their type is {}",
                 param.get_name(),
-                param.get_variable_type()
+                if param_is_reference_to {
+                    "REFERENCE TO".to_string()
+                } else {
+                    param.get_variable_type().to_string()
+                }
             ))
             .with_error_code("E031")
             .with_location(arg),
         ),
+    }
+}
+
+/// A parameter that is passed by reference (`VAR_IN_OUT`, a function `VAR_OUTPUT`,
+/// `VAR_INPUT {ref}` or a `REFERENCE TO` type) binds the address of its argument, so implicit
+/// conversions are not possible: the argument must have exactly the parameter's type.
+fn validate_by_ref_argument_type<T: AnnotationMap>(
+    validator: &mut Validator,
+    context: &ValidationContext<T>,
+    param: &VariableIndexEntry,
+    arg: &AstNode,
+) {
+    let Some(param_type_info) = context.index.find_effective_type_info(param.get_type_name()) else {
+        return;
+    };
+    if !(param.get_declaration_type().is_by_ref() || param_type_info.is_reference_to()) {
+        return;
+    }
+
+    // Non-references (literals, expressions) are passed through a temporary or already flagged
+    // by `validate_call_by_ref`.
+    if !arg.can_be_assigned_to() {
+        return;
+    }
+
+    // By-ref parameter types may be wrapped in an auto-deref pointer: compare the target type.
+    let param_type =
+        if let DataTypeInformation::Pointer { inner_type_name, auto_deref: Some(_), .. } = param_type_info {
+            context.index.get_effective_type_or_void_by_name(inner_type_name)
+        } else {
+            context.index.get_effective_type_or_void_by_name(param.get_type_name())
+        };
+
+    // Reference arguments are transparent: compare their target type. An auto-deref variable is
+    // annotated with the raw name of its target type, so resolve aliases as for any other variable.
+    let arg_type = context.annotations.get_type_or_void(arg, context.index);
+    let arg_type = if let DataTypeInformation::Pointer { inner_type_name, auto_deref: Some(_), .. } =
+        arg_type.get_type_information()
+    {
+        context.index.get_effective_type_or_void_by_name(inner_type_name)
+    } else {
+        context.index.find_effective_type(arg_type).unwrap_or(arg_type)
+    };
+
+    if arg_type.get_type_information().is_pointer() {
+        return;
+    }
+
+    // Only concrete elementary types are compared: structurally equal aggregates carry
+    // distinct type names and their compatibility is covered by the general assignment
+    // validation, as are aggregate arguments to elementary parameters. Pointer targets are
+    // covered by the pointer assignment validation, generic targets are only concrete after
+    // instantiation.
+    if arg_type.is_aggregate_type()
+        || param_type.is_aggregate_type()
+        || param_type.get_type_information().is_pointer()
+        || param_type.get_type_information().is_generic(context.index)
+    {
+        return;
+    }
+
+    // The callee accesses the argument's storage with the parameter's type: a smaller argument
+    // is read or written beyond its bounds, a larger or equal-sized one is reinterpreted with
+    // byte-order dependent results. Require a representation match: subranges share their
+    // intrinsic type's representation and bind in both directions.
+    fn representation<'idx>(index: &'idx Index, ty: &'idx DataType) -> &'idx DataType {
+        match ty.get_type_information() {
+            DataTypeInformation::SubRange { referenced_type, .. } => {
+                index.get_effective_type_or_void_by_name(referenced_type)
+            }
+            _ => ty,
+        }
+    }
+
+    if representation(context.index, arg_type).get_name()
+        != representation(context.index, param_type).get_name()
+    {
+        validator.push_diagnostic(
+            Diagnostic::new(format!(
+                "Parameter {} is passed by reference, it requires an argument of type {} but got {}",
+                param.get_name(),
+                validator.get_type_name_or_slice(param_type),
+                validator.get_type_name_or_slice(arg_type)
+            ))
+            .with_error_code("E037")
+            .with_location(arg),
+        );
     }
 }
 
@@ -1319,7 +1642,7 @@ fn validate_alias_assignment<T: AnnotationMap>(
     }
 }
 
-fn validate_assignment<T: AnnotationMap>(
+pub(super) fn validate_assignment<T: AnnotationMap>(
     validator: &mut Validator,
     right: &AstNode,
     left: Option<&AstNode>,
@@ -1354,15 +1677,6 @@ fn validate_assignment<T: AnnotationMap>(
                     context.annotations.get_type_or_void(left, context.index),
                     right,
                 );
-            }
-
-            // ...VAR_INPUT {ref} variable
-            if matches!(argument_type, ArgumentType::ByRef(VariableType::Input)) {
-                validator.push_diagnostic(
-                    Diagnostic::new("VAR_INPUT {ref} variables are mutable and changes to them will also affect the referenced variable. For increased clarity use VAR_IN_OUT instead.")
-                    .with_error_code("E042")
-                    .with_location(location)
-                    );
             }
 
             is_output_assignment = matches!(argument_type, ArgumentType::ByRef(VariableType::Output))
@@ -1550,6 +1864,51 @@ fn is_ref_or_adr_call<T: AnnotationMap>(node: &AstNode, context: &ValidationCont
             .index
             .get_builtin_function(call_name)
             .is_some_and(|builtin| std::ptr::eq(builtin, ref_builtin))
+}
+
+/// Validates that a `VAR_IN_OUT` variable is not read or written outside of the POU it is
+/// declared in (e.g. `fbInstance.inOutVariable := 1;`). In the instance an in-out variable is a
+/// pointer that is only bound to a target for the duration of a call, so any outside access
+/// dereferences an unbound pointer.
+fn validate_in_out_variable_access<T: AnnotationMap>(
+    validator: &mut Validator,
+    statement: &AstNode,
+    base: Option<&AstNode>,
+    context: &ValidationContext<T>,
+) {
+    let location = statement.get_location();
+    if location.is_internal() {
+        return;
+    }
+
+    // a named argument in a call (`fbInstance(inOutVariable := x)`) is how the variable gets
+    // bound in the first place
+    if context.is_call() && base.is_none() {
+        return;
+    }
+
+    let Some(StatementAnnotation::Variable { qualified_name, argument_type, .. }) =
+        context.annotations.get(statement)
+    else {
+        return;
+    };
+
+    if !matches!(argument_type.get_inner(), VariableType::InOut) {
+        return;
+    }
+
+    if !variable_is_in_inherited_or_self_scope(
+        context.qualifier.and_then(|qualifier| context.index.find_pou(qualifier)),
+        context,
+        qualified_name,
+        &location,
+    ) {
+        validator.push_diagnostic(
+            Diagnostic::new("VAR_IN_OUT variables cannot be accessed outside of their scope.")
+                .with_error_code("E037")
+                .with_location(&location),
+        );
+    }
 }
 
 fn variable_is_in_inherited_or_self_scope<T: AnnotationMap>(
@@ -1793,6 +2152,8 @@ fn is_valid_assignment(
         // because those would fail
         return true;
     } else if is_invalid_char_assignment(left_type.get_type_information(), right_type.get_type_information())
+        | is_invalid_bool_assignment(left_type.get_type_information(), right_type.get_type_information())
+        | is_invalid_bool_literal_assignment(left_type.get_type_information(), right)
         | is_invalid_pointer_assignment(
             left_type.get_type_information(),
             right_type.get_type_information(),
@@ -1897,6 +2258,23 @@ fn is_invalid_char_assignment(left_type: &DataTypeInformation, right_type: &Data
     false
 }
 
+/// a BOOL value is not implicitly converted to another numeric type
+fn is_invalid_bool_assignment(left_type: &DataTypeInformation, right_type: &DataTypeInformation) -> bool {
+    right_type.is_bool() && left_type.is_numerical() && !left_type.is_bool()
+}
+
+/// only the literals 0 and 1 are BOOL values
+fn is_invalid_bool_literal_assignment(left_type: &DataTypeInformation, right: &AstNode) -> bool {
+    if !left_type.is_bool() {
+        return false;
+    }
+    match right.get_stmt_peeled() {
+        AstStatement::Literal(AstLiteral::Integer(value)) => *value != 0 && *value != 1,
+        AstStatement::Literal(AstLiteral::Real(_)) => true,
+        _ => false,
+    }
+}
+
 /// aggregate types can only be assigned to aggregate types
 /// special case char := string_with_length_1, handled by `is_valid_string_to_char_assignment()`
 fn is_aggregate_to_none_aggregate_assignment(left_type: &DataType, right_type: &DataType) -> bool {
@@ -1964,16 +2342,23 @@ fn validate_call<T: AnnotationMap>(
     let mut arguments_are_implicit = true;
     let mut variable_location_in_parent = vec![];
 
-    // validate parameters
-    for (i, argument) in arguments.iter().enumerate() {
-        match get_implicit_call_parameter(argument, &parameters, i) {
-            Ok((parameter_idx, right, is_implicit)) => {
+    // validate parameters; each argument is checked against the parameter it binds to, see
+    // `resolve_argument_slots`
+    let slots = resolve_argument_slots(&arguments, parameters.iter().map(|it| it.get_name()));
+    for (i, (argument, slot)) in arguments.iter().zip(slots).enumerate() {
+        match get_implicit_call_parameter(argument, slot) {
+            Ok((slot, right, is_implicit)) => {
                 if i == 0 {
                     arguments_are_implicit = is_implicit;
                 }
 
-                if let Some(left) = parameters.get(parameter_idx) {
-                    validate_call_by_ref(validator, left, argument);
+                if let Some(left) = slot.and_then(|slot| parameters.get(slot)) {
+                    validate_call_by_ref(validator, context, left, argument);
+                    // Builtins declare their parameters with generic placeholder types and
+                    // bring their own validation.
+                    if builtins::get_builtin(pou.get_name()).is_none() {
+                        validate_by_ref_argument_type(validator, context, left, right);
+                    }
                     // 'parameter location in parent' and 'variable location in parent' are not the same (e.g VAR blocks are not counted as param).
                     // save actual location in parent for InOut validation
                     variable_location_in_parent.push(left.get_location_in_parent());
@@ -2097,8 +2482,20 @@ fn validate_call<T: AnnotationMap>(
             return;
         }
 
-        let declared_in_out_params: Vec<&VariableIndexEntry> =
-            parameters.into_iter().filter(|param| param.is_inout()).collect();
+        // VAR_IN_OUT arguments are always required. REFERENCE TO inputs of methods are bound
+        // per call and therefore required as well; on stateful POUs their binding persists in
+        // the instance, so they stay optional.
+        let declared_in_out_params: Vec<&VariableIndexEntry> = parameters
+            .into_iter()
+            .filter(|param| {
+                param.is_inout()
+                    || (pou.is_method()
+                        && context
+                            .index
+                            .find_effective_type_info(param.get_type_name())
+                            .is_some_and(|it| it.is_reference_to()))
+            })
+            .collect();
 
         if !declared_in_out_params.is_empty() {
             // Check if all IN_OUT arguments were passed by cross-checking with the parameters
@@ -2220,6 +2617,33 @@ fn validate_for_loop<T: AnnotationMap>(
     //       by a VAR_INPUT {ref} function call.
 }
 
+/// Checks whether a generic call argument's `actual_type` satisfies the `generic_nature` it is
+/// bound to, returning the `E062` diagnostic (anchored at `location`) when it does not.
+///
+/// Shared with the aggregate-return lowerer, which must run this check before it rewrites a generic
+/// call to its concrete instantiation (which erases the generic nature this relies on).
+pub(crate) fn evaluate_generic_nature_violation(
+    actual_type: &DataType,
+    type_hint: &DataType,
+    generic_nature: TypeNature,
+    index: &Index,
+    location: &AstNode,
+) -> Option<Diagnostic> {
+    // An INT argument for a REAL generic is allowed, otherwise the nature must match.
+    if actual_type.has_nature(generic_nature, index) || (type_hint.is_real() && actual_type.is_numerical()) {
+        return None;
+    }
+
+    Some(
+        Diagnostic::new(format!(
+            "Invalid type nature for generic argument. {} is no {generic_nature}",
+            actual_type.get_name(),
+        ))
+        .with_error_code("E062")
+        .with_location(location),
+    )
+}
+
 /// Validates that the assigned type and type hint are compatible with the nature for this
 /// statement
 fn validate_type_nature<T: AnnotationMap>(
@@ -2251,19 +2675,14 @@ fn validate_type_nature<T: AnnotationMap>(
         {
             // check if type_hint and actual_type is compatible
             // should be handled by assignment validation
-            if !(actual_type.has_nature(*generic_nature, context.index)
-                // INT parameter for REAL is allowed
-                | (type_hint.is_real() & actual_type.is_numerical()))
-            {
-                validator.push_diagnostic(
-                    Diagnostic::new(format!(
-                        "Invalid type nature for generic argument. {} is no {}",
-                        actual_type.get_name(),
-                        generic_nature
-                    ))
-                    .with_error_code("E062")
-                    .with_location(statement),
-                );
+            if let Some(diagnostic) = evaluate_generic_nature_violation(
+                actual_type,
+                type_hint,
+                *generic_nature,
+                context.index,
+                statement,
+            ) {
+                validator.push_diagnostic(diagnostic);
             }
         }
     }
@@ -2281,10 +2700,21 @@ fn validate_assignment_type_sizes<T: AnnotationMap>(
         lhs_is_signed_int: bool,
         is_builtin_call: bool,
     ) -> FxHashMap<&'b DataType, Vec<SourceLocation>> {
+        // arithmetic on date and time operands is carried out by a function, its result is the value
+        let carried_out_by_function = |left: &AstNode, operator: &Operator, right: &AstNode| {
+            let left_type = context.annotations.get_type_or_void(left, context.index);
+            let right_type = context.annotations.get_type_or_void(right, context.index);
+            operator.is_arithmetic_operator()
+                && matches!(
+                    get_date_time_arithmetic(context.index, left_type, operator, right_type),
+                    Some(DateTimeArithmetic::Call { .. })
+                )
+        };
+
         let mut map: FxHashMap<&DataType, Vec<SourceLocation>> = FxHashMap::default();
         match expression.get_stmt_peeled() {
             AstStatement::BinaryExpression(BinaryExpression { operator, left, right, .. })
-                if !operator.is_comparison_operator() =>
+                if !operator.is_comparison_operator() && !carried_out_by_function(left, operator, right) =>
             {
                 get_expression_types_and_locations(left, context, lhs_is_signed_int, false)
                     .into_iter()
@@ -2422,13 +2852,14 @@ fn validate_argument_count<T: AnnotationMap>(
 }
 
 /// Validates an expression to ensure that the given literal or constant is not 0
-fn validate_zero_diviser<T: AnnotationMap>(
-    context: &ValidationContext<T>,
+pub fn validate_zero_diviser(
     validator: &mut Validator,
+    annotations: &dyn AnnotationMap,
+    index: &Index,
     statement: &AstNode,
     location: &SourceLocation,
 ) {
-    if is_literal_or_const_expr_value_zero(statement, context) {
+    if is_literal_or_const_expr_value_zero(statement, annotations, index) {
         validator.push_diagnostic(
             Diagnostic::new("Division by Zero").with_error_code("E123").with_location(location),
         );
@@ -2438,7 +2869,8 @@ fn validate_zero_diviser<T: AnnotationMap>(
 pub(crate) mod helper {
     use std::ops::Range;
 
-    use plc_ast::ast::{AstNode, DirectAccessType};
+    use plc_ast::ast::{AstNode, AstStatement, DirectAccessType};
+    use plc_ast::literals::{AstLiteral, Time};
 
     use crate::index::VariableIndexEntry;
     use crate::resolver::AnnotationMap;
@@ -2506,25 +2938,24 @@ pub(crate) mod helper {
         variant_const_values
     }
 
-    pub fn is_literal_or_const_expr_value_zero<T>(right: &AstNode, context: &ValidationContext<T>) -> bool
-    where
-        T: AnnotationMap,
-    {
+    pub fn is_literal_or_const_expr_value_zero(
+        right: &AstNode,
+        annotations: &dyn AnnotationMap,
+        index: &Index,
+    ) -> bool {
         let right = right.get_node_peeled();
-        if right.is_zero() {
+        if is_zero_literal(right) {
             return true;
         }
 
-        if let Some(statement_annotation) = context.annotations.get(right) {
+        if let Some(statement_annotation) = annotations.get(right) {
             if let Some(path) = statement_annotation.qualified_name() {
-                if let Some(element) = context.index.find_fully_qualified_variable(path) {
+                if let Some(element) = index.find_fully_qualified_variable(path) {
                     if statement_annotation.is_const() {
-                        if let Some(constant_statement) = context
-                            .index
-                            .get_const_expressions()
-                            .maybe_get_constant_statement(&element.initial_value)
+                        if let Some(constant_statement) =
+                            index.get_const_expressions().maybe_get_constant_statement(&element.initial_value)
                         {
-                            return constant_statement.is_zero();
+                            return is_zero_literal(constant_statement);
                         }
                     }
                 }
@@ -2532,5 +2963,11 @@ pub(crate) mod helper {
         }
 
         false
+    }
+
+    /// Returns true if the node is a number or a duration literal of value zero
+    fn is_zero_literal(node: &AstNode) -> bool {
+        node.is_zero()
+            || matches!(node.get_stmt(), AstStatement::Literal(AstLiteral::Time(Time { nanos: 0, .. })))
     }
 }

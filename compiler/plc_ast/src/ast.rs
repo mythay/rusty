@@ -556,6 +556,10 @@ impl VariableBlockType {
     pub fn is_inout(&self) -> bool {
         matches!(self, VariableBlockType::InOut)
     }
+
+    pub fn is_output(&self) -> bool {
+        matches!(self, VariableBlockType::Output)
+    }
 }
 
 impl Display for VariableBlockType {
@@ -683,6 +687,14 @@ impl Debug for Variable {
 }
 
 impl Variable {
+    pub fn new(
+        name: impl Into<String>,
+        data_type_declaration: DataTypeDeclaration,
+        location: SourceLocation,
+    ) -> Variable {
+        Variable { name: name.into(), data_type_declaration, initializer: None, address: None, location }
+    }
+
     pub fn replace_data_type_with_reference_to(&mut self, type_name: String) -> DataTypeDeclaration {
         let new_data_type = DataTypeDeclaration::Reference {
             referenced_type: type_name,
@@ -727,6 +739,10 @@ impl From<&DataTypeDeclaration> for SourceLocation {
 }
 
 impl DataTypeDeclaration {
+    pub fn reference(referenced_type: impl Into<String>, location: SourceLocation) -> DataTypeDeclaration {
+        DataTypeDeclaration::Reference { referenced_type: referenced_type.into(), location }
+    }
+
     pub fn get_name(&self) -> Option<&str> {
         match self {
             Self::Aggregate { referenced_type, .. }
@@ -1212,11 +1228,16 @@ impl Debug for AstNode {
             AstStatement::LabelStatement(LabelStatement { name, .. }) => {
                 f.debug_struct("LabelStatement").field("name", name).finish()
             }
-            AstStatement::AllocationStatement(Allocation { name, reference_type }) => f
-                .debug_struct("Allocation")
-                .field("name", name)
-                .field("reference_type", reference_type)
-                .finish(),
+            AstStatement::AllocationStatement(Allocation { name, reference_type, statement_scoped }) => {
+                let mut out = f.debug_struct("Allocation");
+                out.field("name", name).field("reference_type", reference_type);
+                // Only surface the exceptional pinned case; the common statement-scoped
+                // allocation keeps its compact debug output.
+                if !statement_scoped {
+                    out.field("statement_scoped", statement_scoped);
+                }
+                out.finish()
+            }
         }
     }
 }
@@ -1708,6 +1729,36 @@ pub fn get_enum_element_name(enum_element: &AstNode) -> String {
     }
 }
 
+/// Resolves, for every argument of a call, the slot of the declared parameter it binds to.
+///
+/// A named argument (`name := value` or `name => value`) claims the slot its name declares. A positional
+/// argument fills the first slot no name claims, in the order the arguments are written; thus
+/// `foo(c := 1, 2, 3)` binds `2` to `a` and `3` to `b`. `None` marks an argument bound to no declared
+/// parameter: a positional argument left over once every slot is filled (it belongs to the variadic
+/// parameter, if the callee declares one) or a named argument whose name declares no parameter.
+///
+/// This is the single rule for binding call arguments; the resolver, the generic lowering, the validator
+/// and the codegen all derive the parameter of an argument from it.
+pub fn resolve_argument_slots<'a>(
+    arguments: &[&AstNode],
+    parameter_names: impl IntoIterator<Item = &'a str>,
+) -> Vec<Option<usize>> {
+    let parameter_names: Vec<&str> = parameter_names.into_iter().collect();
+    let slot_of = |name: &str| parameter_names.iter().position(|it| it.eq_ignore_ascii_case(name));
+
+    let claimed_slots: Vec<usize> =
+        arguments.iter().filter_map(|it| it.get_assignment_identifier()).filter_map(slot_of).collect();
+    let mut free_slots = (0..parameter_names.len()).filter(|slot| !claimed_slots.contains(slot));
+
+    arguments
+        .iter()
+        .map(|argument| match argument.get_assignment_identifier() {
+            Some(name) => slot_of(name),
+            None => free_slots.next(),
+        })
+        .collect()
+}
+
 /// flattens expression-lists and MultipliedStatements into a vec of statements.
 /// It can also handle nested structures like 2(3(4,5))
 pub fn flatten_expression_list(list: &AstNode) -> Vec<&AstNode> {
@@ -1738,6 +1789,12 @@ pub fn pre_process(unit: &mut CompilationUnit, id_provider: IdProvider) {
     pre_processor::pre_process(unit, id_provider)
 }
 impl Operator {
+    /// returns true, if this operator is one of the four arithmetic operators
+    /// (+, -, *, /)
+    pub fn is_arithmetic_operator(&self) -> bool {
+        matches!(self, Operator::Plus | Operator::Minus | Operator::Multiplication | Operator::Division)
+    }
+
     /// returns true, if this operator is a comparison operator,
     /// resulting in a bool value
     /// (=, <>, >, <, >=, <=)
@@ -2296,6 +2353,13 @@ pub struct LabelStatement {
 pub struct Allocation {
     pub name: String,
     pub reference_type: String,
+    /// `true` when the allocated value is dead once the enclosing (lowered) statement
+    /// completes — codegen may then bracket it with `llvm.lifetime` markers and the
+    /// aggregate-type lowering may hand the slot to a later statement. `false` pins the
+    /// slot for the whole function: loop bookkeeping values cross iterations, and temps
+    /// whose address escapes the statement (`ADR`/`REF` arguments, interface fat-pointer
+    /// captures) must stay valid and unshared.
+    pub statement_scoped: bool,
 }
 
 type DerefMarker = ();

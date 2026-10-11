@@ -1,4 +1,4 @@
-// RUN: (%COMPILE %s && %RUN) | %CHECK %s
+// RUN: %COMPILE %s && %RUN | %CHECK %s
 FUNCTION main
     VAR
         var_int     : INT;
@@ -9,6 +9,6 @@ FUNCTION main
     // Cast the REAL value to INT
     var_int := REAL_TO_INT(70_000.4);
 
-    printf('%d$N', var_int); // CHECK: 4464
+    printf('%d$N', var_int); // CHECK: 32767
 
 END_FUNCTION

@@ -1122,11 +1122,11 @@ fn builtin_functions_named_arguments_invalid_parameter_names() {
     14 │             arr2 := MOVE(SOURCE := arr);
        │                          ^^^^^^ Could not resolve reference to SOURCE
 
-    error[E037]: Invalid assignment: cannot assign 'SEL with wrong parameter names a := SEL(WRONG := sel, IN0 := a, IN1 := b); a := SEL(G := sel, INVALID := a,' to 'ARRAY[0..5] OF INT'
+    error[E037]: Invalid assignment: cannot assign 'U' to 'ARRAY[0..5] OF INT'
        ┌─ <internal>:14:13
        │
     14 │             arr2 := MOVE(SOURCE := arr);
-       │             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ Invalid assignment: cannot assign 'SEL with wrong parameter names a := SEL(WRONG := sel, IN0 := a, IN1 := b); a := SEL(G := sel, INVALID := a,' to 'ARRAY[0..5] OF INT'
+       │             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ Invalid assignment: cannot assign 'U' to 'ARRAY[0..5] OF INT'
 
     error[E089]: Invalid call parameters
        ┌─ <internal>:17:25
@@ -1484,6 +1484,439 @@ fn validate_call_by_ref_explicit() {
     );
 
     assert_snapshot!(&diagnostics);
+}
+
+#[test]
+fn validate_call_by_ref_reference_to_input() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION func : DINT
+            VAR_INPUT
+                refIn : REFERENCE TO DINT;
+            END_VAR
+        END_FUNCTION
+
+        PROGRAM main
+            VAR
+                x : DINT;
+                r : REFERENCE TO DINT;
+            END_VAR
+
+            func(refIn := x); // Valid
+            func(refIn := r); // Valid
+            func(x);          // Valid
+            func(refIn := 5);
+            func(refIn := x + 1);
+            func(refIn := );
+            func(5);
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E031]: Expected a reference for parameter refIn because their type is REFERENCE TO
+       ┌─ <internal>:17:27
+       │
+    17 │             func(refIn := 5);
+       │                           ^ Expected a reference for parameter refIn because their type is REFERENCE TO
+
+    error[E031]: Expected a reference for parameter refIn because their type is REFERENCE TO
+       ┌─ <internal>:18:27
+       │
+    18 │             func(refIn := x + 1);
+       │                           ^^^^^ Expected a reference for parameter refIn because their type is REFERENCE TO
+
+    error[E031]: Expected a reference for parameter refIn because their type is REFERENCE TO
+       ┌─ <internal>:19:27
+       │
+    19 │             func(refIn := );
+       │                           ^ Expected a reference for parameter refIn because their type is REFERENCE TO
+
+    error[E031]: Expected a reference for parameter refIn because their type is REFERENCE TO
+       ┌─ <internal>:20:18
+       │
+    20 │             func(5);
+       │                  ^ Expected a reference for parameter refIn because their type is REFERENCE TO
+    ");
+}
+
+#[test]
+fn validate_reference_to_input_argument_must_have_identical_type() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION func : DINT
+            VAR_INPUT
+                refIn : REFERENCE TO DINT;
+            END_VAR
+        END_FUNCTION
+
+        PROGRAM main
+            VAR
+                d : DINT;
+                i : INT;
+                l : LINT;
+                r : REFERENCE TO DINT;
+                ri : REFERENCE TO INT;
+                p : REF_TO DINT;
+            END_VAR
+
+            func(refIn := d); // Valid
+            func(refIn := r); // Valid
+            func(refIn := i);
+            func(refIn := l);
+            func(refIn := ri);
+            func(refIn := p);
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E037]: Parameter refIn is passed by reference, it requires an argument of type DINT but got INT
+       ┌─ <internal>:20:27
+       │
+    20 │             func(refIn := i);
+       │                           ^ Parameter refIn is passed by reference, it requires an argument of type DINT but got INT
+
+    error[E037]: Parameter refIn is passed by reference, it requires an argument of type DINT but got LINT
+       ┌─ <internal>:21:27
+       │
+    21 │             func(refIn := l);
+       │                           ^ Parameter refIn is passed by reference, it requires an argument of type DINT but got LINT
+
+    warning[E067]: Implicit downcast from 'LINT' to 'DINT'.
+       ┌─ <internal>:21:27
+       │
+    21 │             func(refIn := l);
+       │                           ^ Implicit downcast from 'LINT' to 'DINT'.
+
+    error[E037]: Parameter refIn is passed by reference, it requires an argument of type DINT but got INT
+       ┌─ <internal>:22:27
+       │
+    22 │             func(refIn := ri);
+       │                           ^^ Parameter refIn is passed by reference, it requires an argument of type DINT but got INT
+
+    error[E065]: The type DINT 32 is too small to hold a Pointer
+       ┌─ <internal>:23:18
+       │
+    23 │             func(refIn := p);
+       │                  ^^^^^^^^^^ The type DINT 32 is too small to hold a Pointer
+    ");
+}
+
+#[test]
+fn validate_by_ref_argument_must_have_identical_type() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION func : DINT
+            VAR_IN_OUT
+                io : DINT;
+            END_VAR
+
+            VAR_OUTPUT
+                out : DINT;
+            END_VAR
+        END_FUNCTION
+
+        PROGRAM main
+            VAR
+                d : DINT;
+                i : INT;
+                l : LINT;
+                r : REAL;
+            END_VAR
+
+            func(io := d, out => d); // Valid
+            func(io := i, out => d); // Smaller argument, accessed beyond its bounds
+            func(io := d, out => i);
+            func(io := l, out => d); // Larger argument, endianness-dependent reinterpretation
+            func(io := d, out => l);
+            func(io := r, out => d); // Equal size, reinterpreted bit pattern
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E037]: Parameter io is passed by reference, it requires an argument of type DINT but got INT
+       ┌─ <internal>:21:24
+       │
+    21 │             func(io := i, out => d); // Smaller argument, accessed beyond its bounds
+       │                        ^ Parameter io is passed by reference, it requires an argument of type DINT but got INT
+
+    error[E037]: Parameter out is passed by reference, it requires an argument of type DINT but got INT
+       ┌─ <internal>:22:34
+       │
+    22 │             func(io := d, out => i);
+       │                                  ^ Parameter out is passed by reference, it requires an argument of type DINT but got INT
+
+    warning[E067]: Implicit downcast from 'DINT' to 'INT'.
+       ┌─ <internal>:22:27
+       │
+    22 │             func(io := d, out => i);
+       │                           ^^^ Implicit downcast from 'DINT' to 'INT'.
+
+    error[E037]: Parameter io is passed by reference, it requires an argument of type DINT but got LINT
+       ┌─ <internal>:23:24
+       │
+    23 │             func(io := l, out => d); // Larger argument, endianness-dependent reinterpretation
+       │                        ^ Parameter io is passed by reference, it requires an argument of type DINT but got LINT
+
+    warning[E067]: Implicit downcast from 'LINT' to 'DINT'.
+       ┌─ <internal>:23:24
+       │
+    23 │             func(io := l, out => d); // Larger argument, endianness-dependent reinterpretation
+       │                        ^ Implicit downcast from 'LINT' to 'DINT'.
+
+    error[E037]: Parameter out is passed by reference, it requires an argument of type DINT but got LINT
+       ┌─ <internal>:24:34
+       │
+    24 │             func(io := d, out => l);
+       │                                  ^ Parameter out is passed by reference, it requires an argument of type DINT but got LINT
+
+    error[E037]: Parameter io is passed by reference, it requires an argument of type DINT but got REAL
+       ┌─ <internal>:25:24
+       │
+    25 │             func(io := r, out => d); // Equal size, reinterpreted bit pattern
+       │                        ^ Parameter io is passed by reference, it requires an argument of type DINT but got REAL
+
+    warning[E067]: Implicit downcast from 'REAL' to 'DINT'.
+       ┌─ <internal>:25:24
+       │
+    25 │             func(io := r, out => d); // Equal size, reinterpreted bit pattern
+       │                        ^ Implicit downcast from 'REAL' to 'DINT'.
+    ");
+}
+
+#[test]
+fn validate_by_ref_argument_must_not_be_constant() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION func : DINT
+            VAR_INPUT
+                byVal : DINT;
+                refIn : REFERENCE TO DINT;
+            END_VAR
+
+            VAR_IN_OUT
+                io : DINT;
+            END_VAR
+
+            VAR_OUTPUT
+                out : DINT;
+            END_VAR
+        END_FUNCTION
+
+        FUNCTION reader : DINT
+            VAR_INPUT {ref}
+                efficientIn : DINT;
+            END_VAR
+        END_FUNCTION
+
+        PROGRAM main
+            VAR CONSTANT
+                c : DINT := 1;
+            END_VAR
+            VAR
+                x : DINT;
+            END_VAR
+
+            func(byVal := c, refIn := x, io := x, out => x); // Valid, by-val inputs accept constants
+            reader(efficientIn := c);                        // Valid, {ref} is a read-only optimization
+            func(byVal := x, refIn := c, io := x, out => x);
+            func(byVal := x, refIn := x, io := c, out => x);
+            func(byVal := x, refIn := x, io := x, out => c);
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E031]: Parameter refIn is passed by reference and needs a variable with write access, but 'main.c' is constant
+       ┌─ <internal>:33:39
+       │
+    33 │             func(byVal := x, refIn := c, io := x, out => x);
+       │                                       ^ Parameter refIn is passed by reference and needs a variable with write access, but 'main.c' is constant
+
+    error[E031]: Parameter io is passed by reference and needs a variable with write access, but 'main.c' is constant
+       ┌─ <internal>:34:48
+       │
+    34 │             func(byVal := x, refIn := x, io := c, out => x);
+       │                                                ^ Parameter io is passed by reference and needs a variable with write access, but 'main.c' is constant
+
+    error[E031]: Parameter out is passed by reference and needs a variable with write access, but 'main.c' is constant
+       ┌─ <internal>:35:58
+       │
+    35 │             func(byVal := x, refIn := x, io := x, out => c);
+       │                                                          ^ Parameter out is passed by reference and needs a variable with write access, but 'main.c' is constant
+    ");
+}
+
+#[test]
+fn validate_by_ref_argument_with_alias_and_subrange_types() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        TYPE MyInt : DINT; END_TYPE
+        TYPE MyRange : INT(1..10); END_TYPE
+
+        FUNCTION refFunc : DINT
+            VAR_INPUT
+                refDint : REFERENCE TO DINT;
+                refInt : REFERENCE TO INT;
+                refRange : REFERENCE TO MyRange;
+            END_VAR
+        END_FUNCTION
+
+        FUNCTION inOutFunc : DINT
+            VAR_IN_OUT
+                io : DINT;
+                ioInt : INT;
+                ioRange : MyRange;
+            END_VAR
+        END_FUNCTION
+
+        PROGRAM main
+            VAR
+                d : DINT;
+                i : INT;
+                alias : MyInt;
+                ranged : MyRange;
+            END_VAR
+
+            // Valid: aliases resolve to their target type, subranges share their
+            // intrinsic type's representation (both directions)
+            refFunc(refDint := alias, refInt := ranged, refRange := i);
+            refFunc(refDint := d, refInt := i, refRange := ranged);
+            inOutFunc(io := alias, ioInt := ranged, ioRange := i);
+
+            // Different representations: MyRange is an INT, MyInt is a DINT
+            refFunc(refDint := ranged, refInt := alias, refRange := d);
+            inOutFunc(io := ranged, ioInt := alias, ioRange := ranged);
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E037]: Parameter refDint is passed by reference, it requires an argument of type DINT but got MyRange
+       ┌─ <internal>:36:32
+       │
+    36 │             refFunc(refDint := ranged, refInt := alias, refRange := d);
+       │                                ^^^^^^ Parameter refDint is passed by reference, it requires an argument of type DINT but got MyRange
+
+    error[E037]: Parameter refInt is passed by reference, it requires an argument of type INT but got DINT
+       ┌─ <internal>:36:50
+       │
+    36 │             refFunc(refDint := ranged, refInt := alias, refRange := d);
+       │                                                  ^^^^^ Parameter refInt is passed by reference, it requires an argument of type INT but got DINT
+
+    warning[E067]: Implicit downcast from 'DINT' to 'INT'.
+       ┌─ <internal>:36:50
+       │
+    36 │             refFunc(refDint := ranged, refInt := alias, refRange := d);
+       │                                                  ^^^^^ Implicit downcast from 'DINT' to 'INT'.
+
+    error[E037]: Parameter refRange is passed by reference, it requires an argument of type MyRange but got DINT
+       ┌─ <internal>:36:69
+       │
+    36 │             refFunc(refDint := ranged, refInt := alias, refRange := d);
+       │                                                                     ^ Parameter refRange is passed by reference, it requires an argument of type MyRange but got DINT
+
+    warning[E067]: Implicit downcast from 'DINT' to 'MyRange'.
+       ┌─ <internal>:36:69
+       │
+    36 │             refFunc(refDint := ranged, refInt := alias, refRange := d);
+       │                                                                     ^ Implicit downcast from 'DINT' to 'MyRange'.
+
+    error[E037]: Parameter io is passed by reference, it requires an argument of type DINT but got MyRange
+       ┌─ <internal>:37:29
+       │
+    37 │             inOutFunc(io := ranged, ioInt := alias, ioRange := ranged);
+       │                             ^^^^^^ Parameter io is passed by reference, it requires an argument of type DINT but got MyRange
+
+    error[E037]: Parameter ioInt is passed by reference, it requires an argument of type INT but got DINT
+       ┌─ <internal>:37:46
+       │
+    37 │             inOutFunc(io := ranged, ioInt := alias, ioRange := ranged);
+       │                                              ^^^^^ Parameter ioInt is passed by reference, it requires an argument of type INT but got DINT
+
+    warning[E067]: Implicit downcast from 'DINT' to 'INT'.
+       ┌─ <internal>:37:46
+       │
+    37 │             inOutFunc(io := ranged, ioInt := alias, ioRange := ranged);
+       │                                              ^^^^^ Implicit downcast from 'DINT' to 'INT'.
+    ");
+}
+
+#[test]
+fn validate_by_ref_argument_type_check_skips_builtins() {
+    // LOWER_BOUND and UPPER_BOUND declare a generic VAR_IN_OUT parameter; builtins bring
+    // their own validation and must not be checked against their placeholder types.
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION func : DINT
+            VAR_IN_OUT
+                arr : ARRAY[*] OF INT;
+            END_VAR
+            VAR
+                i : INT;
+                d : DINT;
+            END_VAR
+
+            func := LOWER_BOUND(arr, 1) + UPPER_BOUND(arr, 1);
+            func := MUX(i, d, d, d);
+            func := SEL(FALSE, d, d);
+        END_FUNCTION
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"");
+}
+
+#[test]
+fn validate_method_call_requires_reference_to_input() {
+    let diagnostics = parse_and_validate_buffered(
+        r#"
+        FUNCTION_BLOCK fb_t
+            VAR_INPUT
+                refFbIn : REFERENCE TO DINT;
+            END_VAR
+
+            METHOD m
+                VAR_INPUT
+                    refIn : REFERENCE TO DINT;
+                    plain : DINT;
+                END_VAR
+            END_METHOD
+        END_FUNCTION_BLOCK
+
+        PROGRAM main
+            VAR
+                fb : fb_t;
+                x : DINT;
+            END_VAR
+
+            fb.m(refIn := x);             // Valid, `plain` stays optional
+            fb.m(refIn := x, plain := 1); // Valid
+            fb.m(plain := 1);
+            fb.m();
+
+            // The binding of a stateful POU input persists in the instance, it stays optional
+            fb(refFbIn := x); // Valid
+            fb();             // Valid
+        END_PROGRAM
+        "#,
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E030]: Argument `refIn` is missing
+       ┌─ <internal>:23:13
+       │
+    23 │             fb.m(plain := 1);
+       │             ^^^^ Argument `refIn` is missing
+
+    error[E030]: Argument `refIn` is missing
+       ┌─ <internal>:24:13
+       │
+    24 │             fb.m();
+       │             ^^^^ Argument `refIn` is missing
+    ");
 }
 
 #[test]
@@ -1906,9 +2339,9 @@ fn allowed_assignable_types() {
             v := 0;
             x[0] := 1;
             y^ := 2;
-            y^.1 := 3;
+            y^.1 := 1;
             z^[0] := 4;
-            z^[1].1 := 5;
+            z^[1].1 := 1;
         END_PROGRAM
         "#,
     );
@@ -2184,6 +2617,89 @@ fn while_loop_triggers_error_if_condition_is_not_boolean() {
     10 │             WHILE z DO END_WHILE // Returns an error, because we're dealing with neither integers nor booleans
        │                   ^ Expected a boolean, got `STRING`
     ");
+}
+
+#[test]
+fn unary_not_on_aggregate_operand_is_rejected() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        TYPE PI_T_mainTask_bToggle1 : STRUCT
+            out : BOOL;
+        END_STRUCT
+        END_TYPE
+
+        TYPE PI_T_mainTask : STRUCT
+            bToggle1 AT %QX1.2.3.4 : PI_T_mainTask_bToggle1;
+        END_STRUCT
+        END_TYPE
+
+        VAR_GLOBAL
+            mainTask_pi : PI_T_mainTask;
+        END_VAR
+
+        PROGRAM mainProg
+        VAR
+            cycleCnt : UDINT := 1;
+        END_VAR
+
+        cycleCnt := cycleCnt + 1;
+        mainTask_pi.bToggle1 := NOT mainTask_pi.bToggle1;
+        END_PROGRAM
+        ",
+    );
+
+    assert_snapshot!(&diagnostics, @"
+    error[E151]: Unary `NOT` requires a bit or integer operand, got `PI_T_mainTask_bToggle1`
+       ┌─ <internal>:22:33
+       │
+    22 │         mainTask_pi.bToggle1 := NOT mainTask_pi.bToggle1;
+       │                                 ^^^^^^^^^^^^^^^^^^^^^^^^ Unary `NOT` requires a bit or integer operand, got `PI_T_mainTask_bToggle1`
+    ");
+}
+
+#[test]
+fn unary_not_on_qualified_addressed_leaf_is_allowed() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        TYPE PI_T_mainTask_bToggle1 : STRUCT
+            out : BOOL;
+        END_STRUCT
+        END_TYPE
+
+        TYPE PI_T_mainTask : STRUCT
+            bToggle1 AT %QX1.2.3.4 : PI_T_mainTask_bToggle1;
+        END_STRUCT
+        END_TYPE
+
+        VAR_GLOBAL
+            mainTask_pi : PI_T_mainTask;
+        END_VAR
+
+        PROGRAM mainProg
+            mainTask_pi.bToggle1.out := NOT mainTask_pi.bToggle1.out;
+        END_PROGRAM
+        ",
+    );
+
+    assert!(diagnostics.is_empty(), "expected clean diagnostics, got:\n{diagnostics}");
+}
+
+#[test]
+fn unary_not_on_integer_operand_is_allowed() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        PROGRAM mainProg
+        VAR
+            input  : UINT;
+            output : UINT;
+        END_VAR
+
+            output := NOT input;
+        END_PROGRAM
+        ",
+    );
+
+    assert!(diagnostics.is_empty(), "expected clean diagnostics, got:\n{diagnostics}");
 }
 
 #[test]
@@ -2586,66 +3102,30 @@ fn builtin_math_functions_with_incompatible_types() {
         ",
     );
 
-    assert_snapshot!(diagnostics, @r"
-    error[E031]: Invalid expression, types INT and STRING are incompatible in the given context
+    assert_snapshot!(diagnostics, @"
+    error[E156]: Operator `+` is not defined for `INT` and `STRING`
        ┌─ <internal>:12:17
        │
     12 │             ADD(var_int, var_string, var_array_tod);
-       │                 ^^^^^^^^^^^^^^^^^^^ Invalid expression, types INT and STRING are incompatible in the given context
+       │                 ^^^^^^^^^^^^^^^^^^^ Operator `+` is not defined for `INT` and `STRING`
 
-    error[E031]: Invalid expression, types STRING and ARRAY[1..5] OF TOD are incompatible in the given context
-       ┌─ <internal>:12:26
-       │
-    12 │             ADD(var_int, var_string, var_array_tod);
-       │                          ^^^^^^^^^^^^^^^^^^^^^^^^^ Invalid expression, types STRING and ARRAY[1..5] OF TOD are incompatible in the given context
-
-    error[E037]: Invalid assignment: cannot assign 'STRING' to 'LREAL'
-       ┌─ <internal>:12:26
-       │
-    12 │             ADD(var_int, var_string, var_array_tod);
-       │                          ^^^^^^^^^^ Invalid assignment: cannot assign 'STRING' to 'LREAL'
-
-    error[E062]: Invalid type nature for generic argument. STRING is no ANY_NUMBER
-       ┌─ <internal>:12:26
-       │
-    12 │             ADD(var_int, var_string, var_array_tod);
-       │                          ^^^^^^^^^^ Invalid type nature for generic argument. STRING is no ANY_NUMBER
-
-    error[E037]: Invalid assignment: cannot assign 'ARRAY[1..5] OF TOD' to 'LREAL'
-       ┌─ <internal>:12:38
-       │
-    12 │             ADD(var_int, var_string, var_array_tod);
-       │                                      ^^^^^^^^^^^^^ Invalid assignment: cannot assign 'ARRAY[1..5] OF TOD' to 'LREAL'
-
-    error[E031]: Invalid expression, types INT and STRING are incompatible in the given context
+    error[E156]: Operator `-` is not defined for `INT` and `STRING`
        ┌─ <internal>:13:17
        │
     13 │             SUB(var_int, var_string);
-       │                 ^^^^^^^^^^^^^^^^^^^ Invalid expression, types INT and STRING are incompatible in the given context
+       │                 ^^^^^^^^^^^^^^^^^^^ Operator `-` is not defined for `INT` and `STRING`
 
-    error[E031]: Invalid expression, types INT and STRING are incompatible in the given context
+    error[E156]: Operator `*` is not defined for `INT` and `STRING`
        ┌─ <internal>:14:17
        │
     14 │             MUL(var_int, var_string);
-       │                 ^^^^^^^^^^^^^^^^^^^ Invalid expression, types INT and STRING are incompatible in the given context
+       │                 ^^^^^^^^^^^^^^^^^^^ Operator `*` is not defined for `INT` and `STRING`
 
-    error[E037]: Invalid assignment: cannot assign 'STRING' to 'INT'
-       ┌─ <internal>:14:26
-       │
-    14 │             MUL(var_int, var_string);
-       │                          ^^^^^^^^^^ Invalid assignment: cannot assign 'STRING' to 'INT'
-
-    error[E062]: Invalid type nature for generic argument. STRING is no ANY_NUMBER
-       ┌─ <internal>:14:26
-       │
-    14 │             MUL(var_int, var_string);
-       │                          ^^^^^^^^^^ Invalid type nature for generic argument. STRING is no ANY_NUMBER
-
-    error[E031]: Invalid expression, types INT and STRING are incompatible in the given context
+    error[E156]: Operator `/` is not defined for `INT` and `STRING`
        ┌─ <internal>:15:17
        │
     15 │             DIV(var_int, var_string);
-       │                 ^^^^^^^^^^^^^^^^^^^ Invalid expression, types INT and STRING are incompatible in the given context
+       │                 ^^^^^^^^^^^^^^^^^^^ Operator `/` is not defined for `INT` and `STRING`
     ");
 }
 
@@ -2662,30 +3142,30 @@ fn builtin_math_functions_with_incompatible_literal_types() {
         ",
     );
 
-    assert_snapshot!(diagnostics, @r"
-    error[E031]: Invalid expression, types DINT and STRING are incompatible in the given context
+    assert_snapshot!(diagnostics, @"
+    error[E156]: Operator `+` is not defined for `DINT` and `STRING`
       ┌─ <internal>:3:17
       │
     3 │             ADD(1, 'string');
-      │                 ^^^^^^^^^^^ Invalid expression, types DINT and STRING are incompatible in the given context
+      │                 ^^^^^^^^^^^ Operator `+` is not defined for `DINT` and `STRING`
 
-    error[E031]: Invalid expression, types DINT and STRING are incompatible in the given context
+    error[E156]: Operator `-` is not defined for `DINT` and `STRING`
       ┌─ <internal>:4:17
       │
     4 │             SUB(1, 'string');
-      │                 ^^^^^^^^^^^ Invalid expression, types DINT and STRING are incompatible in the given context
+      │                 ^^^^^^^^^^^ Operator `-` is not defined for `DINT` and `STRING`
 
-    error[E031]: Invalid expression, types DINT and STRING are incompatible in the given context
+    error[E156]: Operator `*` is not defined for `DINT` and `STRING`
       ┌─ <internal>:5:17
       │
     5 │             MUL(1, 'string');
-      │                 ^^^^^^^^^^^ Invalid expression, types DINT and STRING are incompatible in the given context
+      │                 ^^^^^^^^^^^ Operator `*` is not defined for `DINT` and `STRING`
 
-    error[E031]: Invalid expression, types DINT and STRING are incompatible in the given context
+    error[E156]: Operator `/` is not defined for `DINT` and `STRING`
       ┌─ <internal>:6:17
       │
     6 │             DIV(1, 'string');
-      │                 ^^^^^^^^^^^ Invalid expression, types DINT and STRING are incompatible in the given context
+      │                 ^^^^^^^^^^^ Operator `/` is not defined for `DINT` and `STRING`
     ");
 }
 
@@ -2887,6 +3367,91 @@ fn division_by_local_zero_constant_results_in_error() {
 }
 
 #[test]
+fn modulo_by_zero_literal_or_constant_results_in_error() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        FUNCTION main
+            VAR
+                x : DINT;
+                modX : DINT;
+            END_VAR
+            VAR CONSTANT
+                ConstantZero: DINT := 0;
+            END_VAR
+
+            x := 5;
+            modX := x MOD 0;
+            modX := x MOD (0);
+            modX := x MOD ConstantZero;
+            modX := 0 MOD x; // a zero dividend is valid
+        END_FUNCTION
+        ",
+    );
+
+    assert_snapshot!(diagnostics, @r"
+    error[E123]: Division by Zero
+       ┌─ <internal>:12:21
+       │
+    12 │             modX := x MOD 0;
+       │                     ^^^^^^^ Division by Zero
+
+    error[E123]: Division by Zero
+       ┌─ <internal>:13:21
+       │
+    13 │             modX := x MOD (0);
+       │                     ^^^^^^^^^ Division by Zero
+
+    error[E123]: Division by Zero
+       ┌─ <internal>:14:21
+       │
+    14 │             modX := x MOD ConstantZero;
+       │                     ^^^^^^^^^^^^^^^^^^ Division by Zero
+    ");
+}
+
+#[test]
+fn modulo_by_zero_duration_results_in_error() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        FUNCTION main
+            VAR
+                t : TIME;
+                lt : LTIME;
+            END_VAR
+            VAR CONSTANT
+                ZeroTime : TIME := T#0s;
+            END_VAR
+
+            t := t MOD T#0s;
+            lt := lt MOD LTIME#0ms;
+            t := t MOD ZeroTime;
+            t := t MOD T#1ms;
+        END_FUNCTION
+        ",
+    );
+
+    assert_snapshot!(diagnostics, @r"
+    error[E123]: Division by Zero
+       ┌─ <internal>:11:18
+       │
+    11 │             t := t MOD T#0s;
+       │                  ^^^^^^^^^^ Division by Zero
+
+    error[E123]: Division by Zero
+       ┌─ <internal>:12:19
+       │
+    12 │             lt := lt MOD LTIME#0ms;
+       │                   ^^^^^^^^^^^^^^^^ Division by Zero
+
+    error[E123]: Division by Zero
+       ┌─ <internal>:13:18
+       │
+    13 │             t := t MOD ZeroTime;
+       │                  ^^^^^^^^^^^^^^ Division by Zero
+    ");
+}
+
+#[test]
 fn division_by_zero_in_struct_constant_results_in_error() {
     let diagnostics = parse_and_validate_buffered(
         "
@@ -2940,6 +3505,51 @@ fn division_by_zero_variable_must_not_result_in_error() {
     );
 
     assert_snapshot!(diagnostics, @"");
+}
+
+#[test]
+fn builtin_division_by_zero_results_in_error() {
+    let diagnostics = parse_and_validate_buffered(
+        "
+        {external} FUNCTION DIV_TIME__LINT : TIME VAR_INPUT IN1 : TIME; IN2 : LINT; END_VAR END_FUNCTION
+
+        VAR_GLOBAL CONSTANT
+            ConstantZero : DINT := 0;
+        END_VAR
+
+        FUNCTION main
+            VAR
+                x : DINT;
+                t : TIME;
+            END_VAR
+
+            x := DIV(x, 0);
+            x := DIV(IN2 := ConstantZero, IN1 := x);
+            t := DIV(t, (0));
+            x := DIV(x, x);
+        END_FUNCTION
+        ",
+    );
+
+    assert_snapshot!(diagnostics, @r"
+    error[E123]: Division by Zero
+       ┌─ <internal>:14:22
+       │
+    14 │             x := DIV(x, 0);
+       │                      ^^^^ Division by Zero
+
+    error[E123]: Division by Zero
+       ┌─ <internal>:15:22
+       │
+    15 │             x := DIV(IN2 := ConstantZero, IN1 := x);
+       │                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Division by Zero
+
+    error[E123]: Division by Zero
+       ┌─ <internal>:16:22
+       │
+    16 │             t := DIV(t, (0));
+       │                      ^^^^^^ Division by Zero
+    ");
 }
 
 #[test]

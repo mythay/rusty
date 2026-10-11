@@ -15,7 +15,8 @@ use crate::utils::Signal;
 #[cfg(any(feature = "mock_time", not(feature = "std")))]
 pub mod test_time_helpers;
 
-pub type Time = i64;
+pub type Time = u32;
+pub type LTime = i64;
 
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -30,10 +31,20 @@ pub struct TimerParams {
     start_time: Option<Instant>,
 }
 
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct TimerParamsLTime {
+    __vtable: usize,
+    input: bool,
+    preset_time: LTime,
+    output: bool,
+    elapsed_time: LTime,
+    input_edge: Signal,
+    is_running: bool,
+    start_time: Option<Instant>,
+}
+
 impl TimerParams {
-    /// This method returns true if the timer has already started
-    /// It does not take into consideration the preset/range for the timer
-    /// Only if a start time has been set.
     fn is_running(&self) -> bool {
         self.is_running
     }
@@ -50,20 +61,77 @@ impl TimerParams {
         self.set_elapsed_time(0);
     }
 
-    fn set_elapsed_time(&mut self, duration: i64) {
+    fn set_elapsed_time(&mut self, duration: Time) {
         self.elapsed_time = duration;
     }
 
-    /// Sets the elapsed time to either the preset time or the real elapsed time, whatever is smaller
     fn update_elapsed_time(&mut self) {
         if self.is_running() {
+            debug_assert!(self.start_time.is_some(), "a running timer must have a start time");
+            let elapsed_millis =
+                self.get_run_time().unwrap_or_default().as_millis().min(u32::MAX as u128) as u32;
+
+            self.set_elapsed_time(core::cmp::min(self.preset_time, elapsed_millis));
+        }
+    }
+
+    // FORK(no_std): the preset edge compares with `<` so a TP output drops exactly at
+    // preset time (IEC 61131-5: Q is TRUE while ET < PT), upstream still uses `<=`.
+    fn is_in_preset_range(&self) -> bool {
+        let duration = Duration::from_millis(self.preset_time as u64);
+        self.get_run_time().is_some_and(|it| it < duration)
+    }
+
+    fn get_run_time(&self) -> Option<Duration> {
+        self.start_time.map(|it| it.elapsed())
+    }
+
+    fn set_output(&mut self, value: bool) {
+        self.output = value;
+    }
+
+    fn input_rising_edge(&mut self) -> bool {
+        self.input_edge.rising_edge(self.input)
+    }
+
+    fn input_falling_edge(&mut self) -> bool {
+        self.input_edge.falling_edge(self.input)
+    }
+}
+
+impl TimerParamsLTime {
+    fn is_running(&self) -> bool {
+        self.is_running
+    }
+
+    fn start(&mut self) {
+        self.start_time = Some(Instant::now());
+        self.is_running = true;
+        self.set_elapsed_time(0);
+    }
+
+    fn reset(&mut self) {
+        self.start_time = None;
+        self.is_running = false;
+        self.set_elapsed_time(0);
+    }
+
+    fn set_elapsed_time(&mut self, duration: LTime) {
+        self.elapsed_time = duration;
+    }
+
+    fn update_elapsed_time(&mut self) {
+        if self.is_running() {
+            debug_assert!(self.start_time.is_some(), "a running timer must have a start time");
             self.set_elapsed_time(core::cmp::min(
                 self.preset_time,
-                self.get_run_time().expect("Timer should be running").as_nanos() as i64,
+                self.get_run_time().unwrap_or_default().as_nanos() as i64,
             ));
         }
     }
 
+    // FORK(no_std): the preset edge compares with `<` so a TP output drops exactly at
+    // preset time (IEC 61131-5: Q is TRUE while ET < PT), upstream still uses `<=`.
     fn is_in_preset_range(&self) -> bool {
         let duration = Duration::from_nanos(self.preset_time as u64);
         self.get_run_time().is_some_and(|it| it < duration)
@@ -86,13 +154,106 @@ impl TimerParams {
     }
 }
 
-#[allow(non_snake_case)]
-#[no_mangle]
-pub extern "C" fn TP(timer: &mut TimerParams) {
-    // If timer is active (start time set)
+trait TimerLogic {
+    fn input(&self) -> bool;
+    fn is_running(&self) -> bool;
+    fn start(&mut self);
+    fn reset(&mut self);
+    fn update_elapsed_time(&mut self);
+    fn is_in_preset_range(&self) -> bool;
+    fn set_output(&mut self, value: bool);
+    fn input_rising_edge(&mut self) -> bool;
+    fn input_falling_edge(&mut self) -> bool;
+    fn update_input_edge(&mut self);
+}
+
+impl TimerLogic for TimerParams {
+    fn input(&self) -> bool {
+        self.input
+    }
+
+    fn is_running(&self) -> bool {
+        self.is_running()
+    }
+
+    fn start(&mut self) {
+        self.start()
+    }
+
+    fn reset(&mut self) {
+        self.reset()
+    }
+
+    fn update_elapsed_time(&mut self) {
+        self.update_elapsed_time()
+    }
+
+    fn is_in_preset_range(&self) -> bool {
+        self.is_in_preset_range()
+    }
+
+    fn set_output(&mut self, value: bool) {
+        self.set_output(value)
+    }
+
+    fn input_rising_edge(&mut self) -> bool {
+        self.input_rising_edge()
+    }
+
+    fn input_falling_edge(&mut self) -> bool {
+        self.input_falling_edge()
+    }
+
+    fn update_input_edge(&mut self) {
+        self.input_edge.set(self.input);
+    }
+}
+
+impl TimerLogic for TimerParamsLTime {
+    fn input(&self) -> bool {
+        self.input
+    }
+
+    fn is_running(&self) -> bool {
+        self.is_running()
+    }
+
+    fn start(&mut self) {
+        self.start()
+    }
+
+    fn reset(&mut self) {
+        self.reset()
+    }
+
+    fn update_elapsed_time(&mut self) {
+        self.update_elapsed_time()
+    }
+
+    fn is_in_preset_range(&self) -> bool {
+        self.is_in_preset_range()
+    }
+
+    fn set_output(&mut self, value: bool) {
+        self.set_output(value)
+    }
+
+    fn input_rising_edge(&mut self) -> bool {
+        self.input_rising_edge()
+    }
+
+    fn input_falling_edge(&mut self) -> bool {
+        self.input_falling_edge()
+    }
+
+    fn update_input_edge(&mut self) {
+        self.input_edge.set(self.input);
+    }
+}
+
+fn run_tp<T: TimerLogic>(timer: &mut T) {
     let output = if timer.is_running() {
         timer.update_elapsed_time();
-        // If time elapsed within range
         if timer.is_in_preset_range() {
             true
         } else {
@@ -105,43 +266,33 @@ pub extern "C" fn TP(timer: &mut TimerParams) {
         timer.start();
         true
     } else {
-        // Behaviour here should be to return only defaults
         false
     };
     timer.set_output(output);
-    timer.input_edge.set(timer.input);
+    timer.update_input_edge();
 }
 
-#[allow(non_snake_case)]
-#[no_mangle]
-pub extern "C" fn TON(timer: &mut TimerParams) {
-    let output = if timer.input {
-        //Timer was strarted at some point
+fn run_ton<T: TimerLogic>(timer: &mut T) {
+    let output = if timer.input() {
         if timer.is_running() {
-            //Timer is still running
             timer.update_elapsed_time();
             !timer.is_in_preset_range()
-            //Timer stopped, but the input is new
         } else if timer.input_rising_edge() {
             timer.start();
             false
-            //Timer stopped, input didn't change (still true from last time)
         } else {
             true
         }
     } else {
-        //Input is false, stop timer regardless
         timer.reset();
         false
     };
     timer.set_output(output);
-    timer.input_edge.set(timer.input);
+    timer.update_input_edge();
 }
 
-#[allow(non_snake_case)]
-#[no_mangle]
-pub extern "C" fn TOF(timer: &mut TimerParams) {
-    let output = if timer.input {
+fn run_tof<T: TimerLogic>(timer: &mut T) {
+    let output = if timer.input() {
         if timer.input_rising_edge() {
             timer.reset();
         }
@@ -156,41 +307,58 @@ pub extern "C" fn TOF(timer: &mut TimerParams) {
         false
     };
     timer.set_output(output);
-    timer.input_edge.set(timer.input);
-}
-
-// Aliases
-#[no_mangle]
-pub extern "C" fn TP_TIME(timer: &mut TimerParams) {
-    TP(timer)
+    timer.update_input_edge();
 }
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub extern "C" fn TP_LTIME(timer: &mut TimerParams) {
-    TP(timer)
+pub extern "C" fn TP(timer: &mut TimerParams) {
+    TP_TIME(timer)
+}
+
+#[allow(non_snake_case)]
+#[no_mangle]
+pub extern "C" fn TON(timer: &mut TimerParams) {
+    TON_TIME(timer)
+}
+
+#[allow(non_snake_case)]
+#[no_mangle]
+pub extern "C" fn TOF(timer: &mut TimerParams) {
+    TOF_TIME(timer)
+}
+
+#[no_mangle]
+pub extern "C" fn TP_TIME(timer: &mut TimerParams) {
+    run_tp(timer)
+}
+
+#[allow(non_snake_case)]
+#[no_mangle]
+pub extern "C" fn TP_LTIME(timer: &mut TimerParamsLTime) {
+    run_tp(timer)
 }
 
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn TON_TIME(timer: &mut TimerParams) {
-    TON(timer)
+    run_ton(timer)
 }
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub extern "C" fn TON_LTIME(timer: &mut TimerParams) {
-    TON(timer)
+pub extern "C" fn TON_LTIME(timer: &mut TimerParamsLTime) {
+    run_ton(timer)
 }
 
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn TOF_TIME(timer: &mut TimerParams) {
-    TOF(timer)
+    run_tof(timer)
 }
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub extern "C" fn TOF_LTIME(timer: &mut TimerParams) {
-    TOF(timer)
+pub extern "C" fn TOF_LTIME(timer: &mut TimerParamsLTime) {
+    run_tof(timer)
 }

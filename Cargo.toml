@@ -20,10 +20,11 @@ verify = []
 [dependencies]
 plc_source = { path = "./compiler/plc_source", version = "1.1.0-dev" }
 plc_ast = { path = "./compiler/plc_ast", version = "1.1.0-dev" }
+plc_lexer = { path = "./compiler/plc_lexer", version = "1.1.0-dev" }
+plc_parser = { path = "./compiler/plc_parser", version = "1.1.0-dev" }
 plc_util = { path = "./compiler/plc_util", version = "1.1.0-dev" }
 plc_diagnostics = { path = "./compiler/plc_diagnostics", version = "1.1.0-dev" }
 plc_index = { path = "./compiler/plc_index", version = "1.1.0-dev" }
-section_mangler = { path = "./compiler/section_mangler", version = "1.1.0-dev" }
 plc_llvm = { path = "./compiler/plc_llvm", version = "1.1.0-dev" }
 logos.workspace = true
 clap = { version = "3.0", features = ["derive"] }
@@ -32,7 +33,6 @@ generational-arena = { version = "0.2.8", features = ["serde"] }
 shell-words = "1.1.0"
 plc_derive = { path = "./compiler/plc_derive", version = "1.1.0-dev" }
 which.workspace = true
-siphasher = "1"
 log.workspace = true
 inkwell.workspace = true
 chrono.workspace = true
@@ -53,7 +53,6 @@ driver = { path = "./compiler/plc_driver/", package = "plc_driver", version = "1
 project = { path = "./compiler/plc_project/", package = "plc_project", version = "1.1.0-dev", features = [
     "integration",
 ] }
-plc_xml = { path = "./compiler/plc_xml", version = "1.1.0-dev" }
 test_utils = { path = "./tests/test_utils" }
 plc_lowering = { path = "./compiler/plc_lowering", version = "1.1.0-dev" }
 serial_test = "*"
@@ -68,25 +67,26 @@ path = "src/lib.rs"
 
 [workspace]
 members = [
-    "xtask",
     "errorcode_book_generator",
     "libs/stdlib",
     "compiler/plc_driver",
     "compiler/plc_ast",
+    "compiler/plc_lexer",
+    "compiler/plc_literals",
+    "compiler/plc_parser",
     "compiler/plc_diagnostics",
     "compiler/plc_project",
     "compiler/plc_source",
     "compiler/plc_util",
-    "compiler/plc_xml",
     "compiler/plc_derive",
     "compiler/plc_index",
-    "compiler/section_mangler",
     "compiler/plc_lowering",
     "compiler/plc_llvm",
     "compiler/plc_header_generator",
+    "compiler/plc_cfc",
     "tests/test_utils",
 ]
-default-members = [".", "compiler/plc_driver", "compiler/plc_xml"]
+default-members = [".", "compiler/plc_driver"]
 
 [workspace.dependencies]
 inkwell = { version = "0.9", features = ["llvm21-1"] }
@@ -111,3 +111,4 @@ regex = "1"
 glob = "0.3"
 cc = "1.0"
 which = "8.0"
+siphasher = "1"

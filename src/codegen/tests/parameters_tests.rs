@@ -414,6 +414,54 @@ fn program_empty_inout_assignment() {
 }
 
 #[test]
+fn program_empty_inout_assignment_takes_type_default() {
+    // GIVEN
+    let result = codegen(
+        "
+        TYPE Preset : DINT := 20; END_TYPE
+
+        PROGRAM prog
+        VAR_IN_OUT
+            inout1 : Preset;
+        END_VAR
+        END_PROGRAM
+
+        PROGRAM main
+            prog(inout1 := );
+        END_PROGRAM
+        ",
+    );
+    // THEN
+    filtered_assert_snapshot!(result, @r#"
+    ; ModuleID = '<internal>'
+    source_filename = "<internal>"
+    target datalayout = "[filtered]"
+    target triple = "[filtered]"
+
+    %prog = type { ptr }
+    %main = type {}
+
+    @prog_instance = global %prog zeroinitializer
+    @main_instance = global %main zeroinitializer
+
+    define void @prog(ptr %0) {
+    entry:
+      %inout1 = getelementptr inbounds nuw %prog, ptr %0, i32 0, i32 0
+      ret void
+    }
+
+    define void @main(ptr %0) {
+    entry:
+      %1 = alloca i32, align [filtered]
+      store i32 20, ptr %1, align [filtered]
+      store ptr %1, ptr @prog_instance, align [filtered]
+      call void @prog(ptr @prog_instance)
+      ret void
+    }
+    "#);
+}
+
+#[test]
 fn program_missing_input_assignment() {
     // GIVEN
     let result = codegen(
@@ -1821,9 +1869,11 @@ fn function_with_array_of_array_return() {
       %data = alloca [2 x [2 x i16]], align [filtered]
       call void @llvm.memset.p0.i64(ptr align [filtered] %data, i8 0, i64 ptrtoint (ptr getelementptr ([2 x [2 x i16]], ptr null, i32 1) to i64), i1 false)
       %__foo0 = alloca [2 x [2 x i16]], align [filtered]
+      call void @llvm.lifetime.start.p0(i64 -1, ptr %__foo0)
       call void @llvm.memset.p0.i64(ptr align [filtered] %__foo0, i8 0, i64 ptrtoint (ptr getelementptr ([2 x [2 x i16]], ptr null, i32 1) to i64), i1 false)
       call void @foo(ptr %__foo0)
       call void @llvm.memcpy.p0.p0.i64(ptr align [filtered] %data, ptr align [filtered] %__foo0, i64 ptrtoint (ptr getelementptr ([2 x [2 x i16]], ptr null, i32 1) to i64), i1 false)
+      call void @llvm.lifetime.end.p0(i64 -1, ptr %__foo0)
       %deref = load ptr, ptr %bar, align [filtered]
       call void @llvm.memcpy.p0.p0.i64(ptr align [filtered] %deref, ptr align [filtered] %data, i64 ptrtoint (ptr getelementptr ([2 x [2 x i16]], ptr null, i32 1) to i64), i1 false)
       ret void
@@ -1851,13 +1901,17 @@ fn function_with_array_of_array_return() {
       %numbers = getelementptr inbounds nuw %main, ptr %0, i32 0, i32 0
       %strings = getelementptr inbounds nuw %main, ptr %0, i32 0, i32 1
       %__bar1 = alloca [2 x [2 x i16]], align [filtered]
+      call void @llvm.lifetime.start.p0(i64 -1, ptr %__bar1)
       call void @llvm.memset.p0.i64(ptr align [filtered] %__bar1, i8 0, i64 ptrtoint (ptr getelementptr ([2 x [2 x i16]], ptr null, i32 1) to i64), i1 false)
       call void @bar(ptr %__bar1)
       call void @llvm.memcpy.p0.p0.i64(ptr align [filtered] %numbers, ptr align [filtered] %__bar1, i64 ptrtoint (ptr getelementptr ([2 x [2 x i16]], ptr null, i32 1) to i64), i1 false)
+      call void @llvm.lifetime.end.p0(i64 -1, ptr %__bar1)
       %__baz2 = alloca [3 x [21 x i8]], align [filtered]
+      call void @llvm.lifetime.start.p0(i64 -1, ptr %__baz2)
       call void @llvm.memset.p0.i64(ptr align [filtered] %__baz2, i8 0, i64 ptrtoint (ptr getelementptr ([3 x [21 x i8]], ptr null, i32 1) to i64), i1 false)
       call void @baz(ptr %__baz2)
       call void @llvm.memcpy.p0.p0.i64(ptr align [filtered] %strings, ptr align [filtered] %__baz2, i64 ptrtoint (ptr getelementptr ([3 x [21 x i8]], ptr null, i32 1) to i64), i1 false)
+      call void @llvm.lifetime.end.p0(i64 -1, ptr %__baz2)
       ret void
     }
 
@@ -1867,10 +1921,17 @@ fn function_with_array_of_array_return() {
     ; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: readwrite)
     declare void @llvm.memcpy.p0.p0.i64(ptr noalias writeonly captures(none), ptr noalias readonly captures(none), i64, i1 immarg) #1
 
+    ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
+    declare void @llvm.lifetime.start.p0(i64 immarg, ptr captures(none)) #2
+
+    ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
+    declare void @llvm.lifetime.end.p0(i64 immarg, ptr captures(none)) #2
+
     ; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: readwrite)
     declare void @llvm.memcpy.p0.p0.i32(ptr noalias writeonly captures(none), ptr noalias readonly captures(none), i32, i1 immarg) #1
 
     attributes #0 = { nocallback nofree nounwind willreturn memory(argmem: write) }
     attributes #1 = { nocallback nofree nounwind willreturn memory(argmem: readwrite) }
+    attributes #2 = { nocallback nofree nosync nounwind willreturn memory(argmem: readwrite) }
     "#);
 }

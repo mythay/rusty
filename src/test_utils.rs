@@ -2,10 +2,8 @@
 pub mod tests {
 
     use std::{
-        collections::HashMap,
         path::{Path, PathBuf},
         str::FromStr,
-        sync::Mutex,
     };
 
     use plc_ast::{
@@ -26,14 +24,14 @@ pub mod tests {
         codegen::{CodegenContext, GeneratedModule},
         index::{self, FxIndexSet, Index},
         lexer,
-        lowering::calls::AggregateTypeLowerer,
+        lowering::{calls::AggregateTypeLowerer, generics::GenericLowerer},
         parser,
         resolver::{
             const_evaluator::evaluate_constants, AnnotationMapImpl, AstAnnotations, Dependency,
             StringLiterals, TypeAnnotator,
         },
         typesystem::get_builtin_types,
-        DebugLevel, OnlineChange, Target, Validator,
+        DebugLevel, Target, Validator,
     };
 
     pub fn parse(src: &str) -> (CompilationUnit, Vec<Diagnostic>) {
@@ -111,6 +109,111 @@ pub mod tests {
         index
     }
 
+    /// Runs the generic-monomorphization lowering phase over a single, already-indexed-and-annotated
+    /// unit, mirroring the driver's `GenericLowerer` participant fixed point: each pass rewrites
+    /// resolvable generic calls to concrete monomorphizations and materializes missing ones, then the
+    /// unit is re-indexed and re-annotated so those monomorphs become resolvable. Returns the final
+    /// index, annotations and any diagnostics the phase emitted (e.g. `E062` generic-nature
+    /// violations).
+    ///
+    /// Generic resolution no longer happens in the annotator's first pass, so unit-test harnesses call
+    /// this to exercise the same resolution the real compiler performs. Units with no user-declared
+    /// generic POU are returned untouched (nothing to monomorphize — generic *builtins* like `MAX` are
+    /// resolved by codegen, not this phase).
+    pub fn lower_generics_single_unit(
+        unit: &mut CompilationUnit,
+        index: Index,
+        annotations: AnnotationMapImpl,
+        id_provider: IdProvider,
+    ) -> (Index, AnnotationMapImpl, Vec<Diagnostic>) {
+        if !unit.pous.iter().any(|pou| !pou.generics.is_empty()) {
+            return (index, annotations, Vec::new());
+        }
+
+        let mut lowerer = GenericLowerer::new(id_provider.clone());
+        let mut index = index;
+        let mut annotations = annotations;
+        loop {
+            lowerer.index = Some(index);
+            lowerer.annotation = Some(Box::new(annotations));
+            let changed = lowerer.lower(std::slice::from_mut(unit));
+            lowerer.index = None;
+            lowerer.annotation = None;
+
+            // Re-index + re-annotate from the (possibly mutated) AST so materialized monomorph POUs
+            // are indexed and rewritten calls bind to them (mirrors `ParsedProject::index/annotate`).
+            pre_process(unit, id_provider.clone());
+            let new_index = index_unit_with_id(unit, id_provider.clone());
+            let (mut new_index, _) = evaluate_constants(new_index);
+            let (mut new_annotations, ..) = TypeAnnotator::visit_unit(&new_index, unit, id_provider.clone());
+            new_index.import(std::mem::take(&mut new_annotations.new_index));
+            index = new_index;
+            annotations = new_annotations;
+
+            if !changed {
+                break;
+            }
+        }
+        (index, annotations, std::mem::take(&mut lowerer.diagnostics))
+    }
+
+    /// Annotates an already-indexed unit and then runs the generic-monomorphization lowering phase,
+    /// returning the mutated unit (generic calls rewritten to their concrete monomorphizations), the
+    /// final index (with materialized `{external}` monomorph POUs) and the post-lowering annotations.
+    /// This is the unit-test entry point for asserting resolved generic-call names / argument type
+    /// hints, which are now produced by the lowering phase rather than the annotator's first pass.
+    pub fn annotate_and_lower_in_place(
+        mut unit: CompilationUnit,
+        mut index: Index,
+        id_provider: IdProvider,
+    ) -> (CompilationUnit, Index, AnnotationMapImpl) {
+        let (mut annotations, ..) = TypeAnnotator::visit_unit(&index, &unit, id_provider.clone());
+        index.import(std::mem::take(&mut annotations.new_index));
+        let (index, annotations, _) = lower_generics_single_unit(&mut unit, index, annotations, id_provider);
+        (unit, index, annotations)
+    }
+
+    /// The standard library functions that carry out date and time arithmetic, declared without
+    /// bodies for tests that exercise the operators
+    pub const DATE_TIME_ARITHMETIC_FUNCTIONS: &str = r#"
+        FUNCTION ADD_TIME : TIME VAR_INPUT IN1 : TIME; IN2 : TIME; END_VAR END_FUNCTION
+        FUNCTION ADD_TOD_TIME : TOD VAR_INPUT IN1 : TOD; IN2 : TIME; END_VAR END_FUNCTION
+        FUNCTION ADD_DT_TIME : DT VAR_INPUT IN1 : DT; IN2 : TIME; END_VAR END_FUNCTION
+        FUNCTION SUB_TIME : TIME VAR_INPUT IN1 : TIME; IN2 : TIME; END_VAR END_FUNCTION
+        FUNCTION SUB_DATE_DATE : TIME VAR_INPUT IN1 : DATE; IN2 : DATE; END_VAR END_FUNCTION
+        FUNCTION SUB_TOD_TIME : TOD VAR_INPUT IN1 : TOD; IN2 : TIME; END_VAR END_FUNCTION
+        FUNCTION SUB_TOD_TOD : TIME VAR_INPUT IN1 : TOD; IN2 : TOD; END_VAR END_FUNCTION
+        FUNCTION SUB_DT_TIME : DT VAR_INPUT IN1 : DT; IN2 : TIME; END_VAR END_FUNCTION
+        FUNCTION SUB_DT_DT : TIME VAR_INPUT IN1 : DT; IN2 : DT; END_VAR END_FUNCTION
+
+        FUNCTION ADD_LTIME : LTIME VAR_INPUT IN1 : LTIME; IN2 : LTIME; END_VAR END_FUNCTION
+        FUNCTION ADD_LTOD_LTIME : LTOD VAR_INPUT IN1 : LTOD; IN2 : LTIME; END_VAR END_FUNCTION
+        FUNCTION ADD_LDT_LTIME : LDT VAR_INPUT IN1 : LDT; IN2 : LTIME; END_VAR END_FUNCTION
+        FUNCTION SUB_LTIME : LTIME VAR_INPUT IN1 : LTIME; IN2 : LTIME; END_VAR END_FUNCTION
+        FUNCTION SUB_LDATE_LDATE : LTIME VAR_INPUT IN1 : LDATE; IN2 : LDATE; END_VAR END_FUNCTION
+        FUNCTION SUB_LTOD_LTIME : LTOD VAR_INPUT IN1 : LTOD; IN2 : LTIME; END_VAR END_FUNCTION
+        FUNCTION SUB_LTOD_LTOD : LTIME VAR_INPUT IN1 : LTOD; IN2 : LTOD; END_VAR END_FUNCTION
+        FUNCTION SUB_LDT_LTIME : LDT VAR_INPUT IN1 : LDT; IN2 : LTIME; END_VAR END_FUNCTION
+        FUNCTION SUB_LDT_LDT : LTIME VAR_INPUT IN1 : LDT; IN2 : LDT; END_VAR END_FUNCTION
+
+        FUNCTION MUL_TIME__LINT : TIME VAR_INPUT IN1 : TIME; IN2 : LINT; END_VAR END_FUNCTION
+        FUNCTION MUL_TIME__ULINT : TIME VAR_INPUT IN1 : TIME; IN2 : ULINT; END_VAR END_FUNCTION
+        FUNCTION MUL_TIME__REAL : TIME VAR_INPUT IN1 : TIME; IN2 : REAL; END_VAR END_FUNCTION
+        FUNCTION MUL_TIME__LREAL : TIME VAR_INPUT IN1 : TIME; IN2 : LREAL; END_VAR END_FUNCTION
+        FUNCTION DIV_TIME__LINT : TIME VAR_INPUT IN1 : TIME; IN2 : LINT; END_VAR END_FUNCTION
+        FUNCTION DIV_TIME__ULINT : TIME VAR_INPUT IN1 : TIME; IN2 : ULINT; END_VAR END_FUNCTION
+        FUNCTION DIV_TIME__REAL : TIME VAR_INPUT IN1 : TIME; IN2 : REAL; END_VAR END_FUNCTION
+        FUNCTION DIV_TIME__LREAL : TIME VAR_INPUT IN1 : TIME; IN2 : LREAL; END_VAR END_FUNCTION
+        FUNCTION MUL_LTIME__LINT : LTIME VAR_INPUT IN1 : LTIME; IN2 : LINT; END_VAR END_FUNCTION
+        FUNCTION MUL_LTIME__ULINT : LTIME VAR_INPUT IN1 : LTIME; IN2 : ULINT; END_VAR END_FUNCTION
+        FUNCTION MUL_LTIME__REAL : LTIME VAR_INPUT IN1 : LTIME; IN2 : REAL; END_VAR END_FUNCTION
+        FUNCTION MUL_LTIME__LREAL : LTIME VAR_INPUT IN1 : LTIME; IN2 : LREAL; END_VAR END_FUNCTION
+        FUNCTION DIV_LTIME__LINT : LTIME VAR_INPUT IN1 : LTIME; IN2 : LINT; END_VAR END_FUNCTION
+        FUNCTION DIV_LTIME__ULINT : LTIME VAR_INPUT IN1 : LTIME; IN2 : ULINT; END_VAR END_FUNCTION
+        FUNCTION DIV_LTIME__REAL : LTIME VAR_INPUT IN1 : LTIME; IN2 : REAL; END_VAR END_FUNCTION
+        FUNCTION DIV_LTIME__LREAL : LTIME VAR_INPUT IN1 : LTIME; IN2 : LREAL; END_VAR END_FUNCTION
+    "#;
+
     pub fn index(src: &str) -> (CompilationUnit, Index) {
         let id_provider = IdProvider::default();
         let (unit, index, _) = do_index(src, id_provider);
@@ -164,13 +267,25 @@ pub mod tests {
 
         let (mut annotations, ..) = TypeAnnotator::visit_unit(&index, &unit, id_provider.clone());
         index.import(std::mem::take(&mut annotations.new_index));
+
+        // Resolve non-builtin generic calls to their concrete monomorphizations (mirrors the pipeline,
+        // which runs the `GenericLowerer` before the aggregate-return lowerer) so codegen tests see the
+        // materialized `{external}` monomorph POUs and concrete calls.
+        let (index, annotations, _generic_diagnostics) =
+            lower_generics_single_unit(&mut unit, index, annotations, id_provider.clone());
         all_annotations.import(annotations);
 
         let mut aggregate_lowerer = AggregateTypeLowerer::new(id_provider.clone());
         aggregate_lowerer.index.replace(index);
         aggregate_lowerer.annotation.replace(Box::new(all_annotations));
         aggregate_lowerer.visit_unit(&mut unit);
-        let mut full_index = aggregate_lowerer.index.take().unwrap();
+        drop(aggregate_lowerer);
+        // Re-index from the mutated AST so the returned index reflects the aggregate-return signature
+        // changes (e.g. a materialized monomorph's aggregate return converted to a by-ref parameter),
+        // mirroring the pipeline's post-aggregate-lowering re-index. Otherwise the index would be
+        // stale relative to the lowered units.
+        let full_index = index_unit_with_id(&unit, id_provider.clone());
+        let (mut full_index, _) = evaluate_constants(full_index);
         let mut all_annotations = AnnotationMapImpl::default();
 
         let (mut annotations, dependencies, literals) =
@@ -211,7 +326,7 @@ pub mod tests {
         let mut ctxt = GlobalContext::new();
         ctxt.insert(&src, None).unwrap();
 
-        let (unit, index, mut diagnostics) = do_index(src, ctxt.provider());
+        let (mut unit, index, mut diagnostics) = do_index(src, ctxt.provider());
         if abort && !diagnostics.is_empty() {
             // we don't want to continue if we have critical parse errors
             return diagnostics;
@@ -220,6 +335,12 @@ pub mod tests {
         let (mut index, ..) = evaluate_constants(index);
         let (mut annotations, ..) = TypeAnnotator::visit_unit(&index, &unit, ctxt.provider());
         index.import(std::mem::take(&mut annotations.new_index));
+
+        // Generic resolution runs as a lowering phase (mirroring the compiler); validation runs after
+        // it, so E062 generic-nature violations are surfaced here.
+        let (index, annotations, generic_diagnostics) =
+            lower_generics_single_unit(&mut unit, index, annotations, ctxt.provider());
+        diagnostics.extend(generic_diagnostics);
 
         let mut validator = Validator::new(&ctxt);
         validator.perform_global_validation(&index);
@@ -233,30 +354,17 @@ pub mod tests {
     }
 
     pub fn codegen_debug_without_unwrap(src: &str, debug_level: DebugLevel) -> Result<String, String> {
-        codegen_debug_without_unwrap_oc(src, debug_level, OnlineChange::Disabled)
+        codegen_debug_without_unwrap_with_build_info(src, debug_level, None)
     }
 
-    /// Returns either a string or an error, in addition it always returns
-    /// reported diagnostics. Therefor the return value of this method is always a tuple.
-    /// TODO: This should not be so, we should have a diagnostic type that holds multiple new
-    /// issues.
-    pub fn codegen_debug_without_unwrap_oc(
-        src: &str,
-        debug_level: DebugLevel,
-        online_change: OnlineChange,
-    ) -> Result<String, String> {
-        codegen_debug_without_unwrap_oc_with_build_info(src, debug_level, online_change, None)
-    }
-
-    /// Same as [`codegen_debug_without_unwrap_oc`] but lets the caller inject a
+    /// Same as [`codegen_debug_without_unwrap`] but lets the caller inject a
     /// fixed `build_info` string into the produced module. Use this when you
     /// need to assert on the `!llvm.ident` emission; everywhere else pass
     /// `None` (via the simpler entry points) so the produced IR stays
     /// deterministic across test runs.
-    pub fn codegen_debug_without_unwrap_oc_with_build_info(
+    pub fn codegen_debug_without_unwrap_with_build_info(
         src: &str,
         debug_level: DebugLevel,
-        online_change: OnlineChange,
         build_info: Option<&str>,
     ) -> Result<String, String> {
         let mut reporter = Diagnostician::buffered();
@@ -270,8 +378,6 @@ pub mod tests {
 
         let annotations = AstAnnotations::new(annotations, id_provider.next_id());
 
-        let got_layout = Mutex::new(HashMap::default());
-
         let (unit, dependencies, literals) = annotated_units;
         let context = CodegenContext::create();
         let path = PathBuf::from_str("src").ok();
@@ -283,12 +389,11 @@ pub mod tests {
             debug_level,
             &[],
             None,
-            online_change.clone(),
             &Target::System,
             build_info,
         );
         let llvm_index = code_generator
-            .generate_llvm_index(&context, &annotations, &literals, &dependencies, &index, &got_layout, false)
+            .generate_llvm_index(&context, &annotations, &literals, &dependencies, &index, false)
             .map_err(|err| {
                 reporter.handle(&[err.into()]);
                 reporter.buffer().unwrap()
@@ -357,19 +462,15 @@ pub mod tests {
                     debug_level,
                     debug_prefix_maps,
                     debug_compilation_dir,
-                    crate::OnlineChange::Disabled,
                     &Target::System,
                     None, // build_info: deterministic IR for tests
                 );
-                let got_layout = Mutex::new(HashMap::default());
-
                 let llvm_index = code_generator.generate_llvm_index(
                     context,
                     &annotations,
                     &literals,
                     &dependencies,
                     &index,
-                    &got_layout,
                     false,
                 )?;
 

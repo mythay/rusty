@@ -1237,6 +1237,14 @@ impl TypeIndex {
         self.types.get(&type_name.to_lowercase()).or_else(|| self.find_pou_type(type_name))
     }
 
+    pub fn find_type_mut(&mut self, type_name: &str) -> Option<&mut DataType> {
+        let key = type_name.to_lowercase();
+        match self.types.get(&key) {
+            Some(_) => self.types.get_mut(&key),
+            None => self.pou_types.get_mut(&key),
+        }
+    }
+
     pub fn find_pou_type(&self, type_name: &str) -> Option<&DataType> {
         self.pou_types.get(&type_name.to_lowercase())
     }
@@ -1607,6 +1615,22 @@ impl Index {
     /// Searches for variable name in the given container, if not found, attempts to search for it in super classes
     pub fn find_member(&self, container_name: &str, variable_name: &str) -> Option<&VariableIndexEntry> {
         self.find_member_recursive(container_name, variable_name, &mut FxHashSet::default())
+    }
+
+    /// Updates the declared type of a container's local member in place, e.g. after a lowering
+    /// pass replaced a generic declaration with a concrete one. Returns whether the member existed.
+    pub fn update_member_type(&mut self, container_name: &str, variable_name: &str, type_name: &str) -> bool {
+        let Some(data_type) = self.type_index.find_type_mut(container_name) else { return false };
+        let DataTypeInformation::Struct { members, .. } = &mut data_type.information else { return false };
+
+        let Some(member) =
+            members.iter_mut().find(|member| member.get_name().eq_ignore_ascii_case(variable_name))
+        else {
+            return false;
+        };
+
+        member.data_type_name = type_name.to_string();
+        true
     }
 
     fn find_member_recursive<'b>(
@@ -2157,11 +2181,13 @@ impl Index {
         variant: &str,
         initial_value: Option<ConstId>,
         source_location: SourceLocation,
+        linkage: LinkageType,
     ) -> VariableIndexEntry {
         let qualified_name = qualified_name(name, variant);
         let entry = VariableIndexEntry::create_global(variant, &qualified_name, name, source_location)
             .set_constant(true)
-            .set_initial_value(initial_value);
+            .set_initial_value(initial_value)
+            .set_linkage(linkage);
 
         self.enum_global_variables.insert(variant.to_lowercase(), entry.clone());
         entry
@@ -2338,12 +2364,14 @@ impl Index {
 
     /// If the provided name is a builtin function, returns it from the builtin index
     pub fn get_builtin_function(&self, name: &str) -> Option<&'_ BuiltIn> {
-        //Find a type for that function, see if that type is builtin
-        if let Some(PouIndexEntry::Function { linkage: LinkageType::BuiltIn, .. }) = self.find_pou(name) {
-            builtins::get_builtin(name)
-        } else {
-            None
-        }
+        // Find a POU with builtin linkage for that function, see if it is a builtin.
+        // A library include may declare the same (generic) function name and be registered
+        // before the builtin entry, so check every POU registered under the name.
+        self.pous
+            .get_all(&name.to_lowercase())?
+            .iter()
+            .find(|it| matches!(it, PouIndexEntry::Function { linkage: LinkageType::BuiltIn, .. }))
+            .and_then(|_| builtins::get_builtin(name))
     }
 
     pub fn get_type_layout(&self) -> &DataLayout {

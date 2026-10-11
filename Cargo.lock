@@ -2284,6 +2284,7 @@ name = "plc-compiler"
 version = "1.0.6"
 dependencies = [
  "anyhow",
+ "cc",
  "chrono",
  "clap 3.2.25",
  "encoding_rs",
@@ -2294,6 +2295,7 @@ dependencies = [
  "insta",
  "itertools",
  "lazy_static",
+ "llvm-sys",
  "log",
  "logos",
  "num",

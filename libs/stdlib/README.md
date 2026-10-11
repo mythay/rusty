@@ -56,6 +56,14 @@ Divergence points:
 - `Cargo.toml`: self dev-dependency so integration tests get the mock clock exports.
 - `.cargo/config.toml` (`cargo mcu-release` / `cargo mcu-debug` aliases) and
   `.github/workflows/mcu-wasm.yml` (keeps the wasm build path green).
+- Root build, `wasm-only` feature: SDK builds link only the WebAssembly backend.
+  inkwell runs llvm-sys with `no-llvm-linking`, and the root `build.rs` re-emits
+  llvm-config's static library list minus the other backends; `llvm_target_stubs.c`
+  no-ops the dropped targets' initializers, and `src/codegen.rs` initializes
+  WebAssembly instead of all targets. Build the SDK compiler with
+  `cargo build --release --features plc-compiler/wasm-only`. Regular builds are
+  upstream-equivalent (all backends, working host JIT); compiling for any non-wasm
+  triple in a wasm-only build is a fork limitation.
 
 There is no allocator on the MCU: nothing in a mcu-wamr build may depend on `alloc`.
 

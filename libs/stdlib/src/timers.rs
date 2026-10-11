@@ -1,9 +1,18 @@
 use core::time::Duration;
 
+// FORK(no_std): upstream uses std::time::Instant unless mock_time is enabled. On mcu-wamr
+// builds there is no OS clock, so the mock clock is the production clock: the WAMR host
+// advances it once per PLC cycle through `__mock_time_advance_ns`.
+#[cfg(any(feature = "mock_time", not(feature = "std")))]
 use test_time_helpers::Instant;
+
+#[cfg(all(not(feature = "mock_time"), feature = "std"))]
+use std::time::Instant;
 
 use crate::utils::Signal;
 
+// FORK(no_std): also compiled as the production clock on mcu-wamr builds.
+#[cfg(any(feature = "mock_time", not(feature = "std")))]
 pub mod test_time_helpers;
 
 pub type Time = i64;

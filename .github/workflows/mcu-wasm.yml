@@ -1,0 +1,32 @@
+# FORK(no_std): verifies the WAMR/MCU build path of libs/stdlib, which no other workflow covers.
+
+name: MCU (WAMR) Build
+
+on:
+  push:
+    branches: [master, "release/[0-9]*"]
+  pull_request:
+    branches: [master, "release/[0-9]*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: wasm32-unknown-unknown (mcu-wamr)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - name: Build the IEC compiler
+        run: cargo build -p plc_driver --bin plc
+
+      - name: Build the stdlib for WAMR
+        working-directory: libs/stdlib
+        env:
+          PLC: ${{ github.workspace }}/target/debug/plc
+        run: cargo mcu-release

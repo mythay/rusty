@@ -1,4 +1,6 @@
-use num::traits::float::Float;
+// FORK(no_std): without std the float methods come from num's libm-backed `Float`.
+#[cfg(not(any(test, feature = "std")))]
+use num::Float;
 
 #[no_mangle]
 pub static PI_LREAL: f64 = core::f64::consts::PI;

@@ -1,4 +1,9 @@
 [build]
-jobs = 4 #Limit t 4 jobs as the tests are sometimes taking up all system resources
-#target = "x86_64-unknown-linux-gnu"
-target = "wasm32-unknown-unknown"
+jobs = 4 #Limit to 4 jobs as the tests are sometimes taking up all system resources
+
+# FORK(no_std): build the WAMR/MCU artifacts; regular host builds use the default target.
+# The release variant inlines the size settings via --config so the workspace-wide
+# [profile.release] stays untouched.
+[alias]
+mcu-debug = "build --no-default-features --features mcu-wamr --target wasm32-unknown-unknown"
+mcu-release = "build --release --no-default-features --features mcu-wamr --target wasm32-unknown-unknown --config profile.release.lto=true --config profile.release.codegen-units=1 --config profile.release.opt-level=\"z\" --config profile.release.panic=\"abort\""

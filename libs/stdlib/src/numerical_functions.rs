@@ -1,3 +1,5 @@
+// FORK(no_std): without std the float methods come from num's libm-backed `Float`.
+#[cfg(not(any(test, feature = "std")))]
 use num::Float;
 
 /// .

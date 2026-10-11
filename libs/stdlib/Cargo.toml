@@ -5,13 +5,13 @@ edition = "2021"
 license = "LGPL-3.0"
 description = "IEC 61131-3 standard library implementation"
 
-#[build-dependencies]
-#glob.workspace = true
-#
-#[build-dependencies.plc_driver]
-#path = "../../compiler/plc_driver"
-#version = "1.1.0-dev"
-
+# FORK(no_std): only the `std` builds run the compiler in-process; mcu-wamr builds invoke
+# an external `plc` binary (see the `PLC` environment variable in build.rs) so they don't
+# have to build the whole compiler toolchain.
+[build-dependencies.plc_driver]
+path = "../../compiler/plc_driver"
+version = "1.1.0-dev"
+optional = true
 
 [dev-dependencies.plc_driver]
 path = "../../compiler/plc_driver"
@@ -26,24 +26,28 @@ package = "plc-compiler"
 path = "../.."
 version = "1.1.0-dev"
 
-
 [dependencies]
 num = { version = "0.4", default-features = false, features = ["libm"] }
 paste = "1.0.8"
-log = { version = "0.4", default-features = false }
-libm = "0.2"
+# FORK(no_std): chrono is only needed by the `std`-only date time modules.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"], optional = true }
 
 [dev-dependencies]
 libloading = "0.9"
 tempfile.workspace = true
 cc.workspace = true
+# Self dev-dependency so integration tests get the mock clock exports, which are
+# otherwise only present on mcu-wamr builds.
+iec61131std = { path = ".", features = ["mock_time"] }
 
 [features]
-default = []
+default = ["std"]
+# FORK(no_std): the std feature gates every module that needs std or chrono.
+std = ["dep:chrono", "dep:plc_driver"]
 mock_time = []
-std = []
+# FORK(no_std): WAMR/MCU build switch, implies no_std and a halting panic handler.
+mcu-wamr = []
 debug = []
 
 [lib]
-crate-type = ["staticlib"]
-
+crate-type = ["staticlib", "lib", "cdylib"]

@@ -111,12 +111,3 @@ regex = "1"
 glob = "0.3"
 cc = "1.0"
 which = "8.0"
-
-[profile.release]
-panic = "abort"
-lto = true
-codegen-units = 1
-opt-level = "z"
-
-# [profile.dev]
-# panic = "abort"

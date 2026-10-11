@@ -22,11 +22,17 @@ jobs:
           toolchain: 1.95.0
           targets: wasm32-unknown-unknown
 
-      - name: Build the IEC compiler
-        run: cargo build -p plc_driver --bin plc
+      # The stdlib's build dependency compiles the IEC compiler for the host, so an
+      # LLVM 21 installation must be reachable (LLVM_SYS_211_PREFIX or PATH).
+      - name: Install LLVM 21
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-21-dev
 
       - name: Build the stdlib for WAMR
         working-directory: libs/stdlib
         env:
-          PLC: ${{ github.workspace }}/target/debug/plc
+          LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
         run: cargo mcu-release

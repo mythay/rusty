@@ -5,13 +5,11 @@ edition = "2021"
 license = "LGPL-3.0"
 description = "IEC 61131-3 standard library implementation"
 
-# FORK(no_std): only the `std` builds run the compiler in-process; mcu-wamr builds invoke
-# an external `plc` binary (see the `PLC` environment variable in build.rs) so they don't
-# have to build the whole compiler toolchain.
+# FORK(no_std): every build runs the IEC compiler in-process (see the `RUSTY_PLC`
+# environment variable in build.rs for the prebuilt-binary escape hatch).
 [build-dependencies.plc_driver]
 path = "../../compiler/plc_driver"
 version = "1.1.0-dev"
-optional = true
 
 [dev-dependencies.plc_driver]
 path = "../../compiler/plc_driver"
@@ -43,7 +41,7 @@ iec61131std = { path = ".", features = ["mock_time"] }
 [features]
 default = ["std"]
 # FORK(no_std): the std feature gates every module that needs std or chrono.
-std = ["dep:chrono", "dep:plc_driver"]
+std = ["dep:chrono"]
 mock_time = []
 # FORK(no_std): WAMR/MCU build switch, implies no_std and a halting panic handler.
 mcu-wamr = []

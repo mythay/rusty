@@ -56,25 +56,25 @@ fn main() {
     #[cfg(target_os = "windows")]
     args.push("--single-module".to_owned());
 
-    // FORK(no_std): std builds run the compiler in-process through the `plc_driver`
-    // build dependency (hermetic, like upstream); mcu-wamr builds invoke an external
-    // `plc` binary so they don't have to build the compiler toolchain. Override its
-    // location with the `PLC` environment variable.
-    #[cfg(feature = "std")]
-    {
-        let mut driver_args = vec!["plc".to_owned()];
-        driver_args.extend(args.iter().cloned());
-        plc_driver::compile(&driver_args).unwrap();
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        let plc = env::var("PLC").unwrap_or_else(|_| "plc".to_owned());
+    // FORK(no_std): the IEC compiler runs in-process through the `plc_driver` build
+    // dependency for every build, so std and mcu-wamr behave identically and there is no
+    // reliance on a `plc` binary in the PATH (whose version can drift from the sources).
+    // Point `RUSTY_PLC` at a prebuilt `plc` executable to skip building the compiler
+    // toolchain entirely and run that binary instead.
+    println!("cargo:rerun-if-env-changed=RUSTY_PLC");
+    if let Ok(plc) = env::var("RUSTY_PLC") {
         let status = Command::new(&plc)
             .args(&args)
             .status()
-            .unwrap_or_else(|err| panic!("failed to run the IEC compiler `{plc}` ({err}); set the PLC environment variable to its location or install it with `cargo build -p plc_driver --bin plc`"));
+            .unwrap_or_else(|err| panic!("failed to run the IEC compiler `{plc}` ({err})"));
         if !status.success() {
             panic!("the IEC compiler `{plc}` failed while compiling the stdlib sources");
+        }
+    } else {
+        let mut driver_args = vec!["plc".to_owned()];
+        driver_args.extend(args.iter().cloned());
+        if let Err(err) = plc_driver::compile(&driver_args) {
+            panic!("the IEC compiler failed while compiling the stdlib sources: {err:#}");
         }
     }
 

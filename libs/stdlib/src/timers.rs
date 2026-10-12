@@ -65,9 +65,13 @@ impl TimerParams {
         }
     }
 
+    // FORK(no_std): compares with `<` so every FB flips its output exactly at ET == PT,
+    // as the IEC 61131-3 timing diagrams define (TP pulse ends, TON switches on, TOF
+    // delay ends). Upstream still uses `<=`, which flips one resolution tick late and is
+    // locked in by upstream's LTIME tests.
     fn is_in_preset_range(&self) -> bool {
         let duration = Duration::from_nanos(self.preset_time as u64);
-        self.get_run_time().is_some_and(|it| it <= duration)
+        self.get_run_time().is_some_and(|it| it < duration)
     }
 
     fn get_run_time(&self) -> Option<Duration> {

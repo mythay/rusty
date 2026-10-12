@@ -69,7 +69,7 @@ There is no allocator on the MCU: nothing in a mcu-wamr build may depend on `all
 
 ## Syncing with upstream (PLC-lang/rusty)
 
-Branch layout: `feature/wasm-stdlib` is the fork's mainline (upstream master + the fork
+Branch layout: `master-wamr` is the fork's mainline (upstream master + the fork
 delta, ~10 commits). Upstream release branches are **not** pre-emptively mirrored.
 
 | Situation | Action |

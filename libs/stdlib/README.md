@@ -66,3 +66,19 @@ Divergence points:
   triple in a wasm-only build is a fork limitation.
 
 There is no allocator on the MCU: nothing in a mcu-wamr build may depend on `alloc`.
+
+## Syncing with upstream (PLC-lang/rusty)
+
+Branch layout: `feature/wasm-stdlib` is the fork's mainline (upstream master + the fork
+delta, ~10 commits). Upstream release branches are **not** pre-emptively mirrored.
+
+| Situation | Action |
+| --------- | ------ |
+| upstream cuts a release (e.g. v1.1.0) | `git fetch upstream --tags && git merge v1.1.0` into the mainline; the delta is small, and the builtins-rework adaptation is already done |
+| an upstream fix is needed before the next release | `git cherry-pick <commit>` onto the mainline |
+| a fork fix is upstream-worthy | small branch + PR to PLC-lang/rusty; take it back through the merge — a smaller delta makes every future sync cheaper |
+| a consumer is pinned to an old release line and needs a patch | only then branch from that tag (e.g. `v1.0.6`) and cherry-pick the delta; note the 1.0.x codebase predates the builtins rework, so the port needs real adaptation work |
+
+The SDK artifact is built from the mainline (`cargo build --release --features
+plc-compiler/wasm-only`); its version string shows the upstream crate version
+(`1.1.0-dev`) plus the fork commit hash, which identifies the actual source.

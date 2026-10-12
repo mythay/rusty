@@ -5,13 +5,11 @@ edition = "2021"
 license = "LGPL-3.0"
 description = "IEC 61131-3 standard library implementation"
 
-[build-dependencies]
-glob.workspace = true
-
+# FORK(no_std): every build runs the IEC compiler in-process (see the `RUSTY_PLC`
+# environment variable in build.rs for the prebuilt-binary escape hatch).
 [build-dependencies.plc_driver]
 path = "../../compiler/plc_driver"
 version = "1.0.6"
-
 
 [dev-dependencies.plc_driver]
 path = "../../compiler/plc_driver"
@@ -26,22 +24,28 @@ package = "plc-compiler"
 path = "../.."
 version = "1.0.6"
 
-
 [dependencies]
-chrono = "0.4"
+# FORK(no_std): chrono is only needed by the `std`-only date time modules.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"], optional = true }
 plc_literals = { path = "../../compiler/plc_literals", version = "1.0.6" }
-num = "0.4"
+num = { version = "0.4", default-features = false, features = ["libm"] }
 paste = "1.0.8"
-log = "0.4"
 
 [dev-dependencies]
 libloading = "0.9"
 tempfile.workspace = true
 cc.workspace = true
+# Self dev-dependency so integration tests get the mock clock exports, which are
+# otherwise only present on mcu-wamr builds.
+iec61131std = { path = ".", features = ["mock_time"] }
 
 [features]
-default = []
+default = ["std"]
+# FORK(no_std): the std feature gates every module that needs std or chrono.
+std = ["dep:chrono"]
 mock_time = []
+# FORK(no_std): WAMR/MCU build switch, implies no_std and a halting panic handler.
+mcu-wamr = []
 debug = []
 
 [lib]

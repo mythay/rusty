@@ -1,4 +1,4 @@
-use std::ops::{BitAnd, Shr};
+use core::ops::{BitAnd, Shr};
 
 /// .
 /// Check if input is a valid REAL
@@ -26,7 +26,7 @@ fn is_valid_bcd<T>(input: T) -> bool
 where
     T: Shr<usize, Output = T> + BitAnd<Output = T> + Copy + From<u8> + PartialOrd,
 {
-    let iterations = std::mem::size_of::<T>() * u8::BITS as usize / BITS_PER_BCD_DIGIT;
+    let iterations = core::mem::size_of::<T>() * u8::BITS as usize / BITS_PER_BCD_DIGIT;
     for i in 0..iterations {
         if ((input >> (BITS_PER_BCD_DIGIT * i)) & 0b1111.into()) > 9.into() {
             return false;

@@ -45,8 +45,6 @@ Divergence points:
 - `src/timers.rs` + `src/timers/test_time_helpers.rs`: the mock clock doubles as the
   production clock on mcu-wamr builds; the WAMR host advances it once per PLC cycle by
   calling `__mock_time_advance_ns`. Date and time functions are not available on MCU.
-  Also carries an upstream-worthy bug fix: the timer preset edge compares with `<`
-  instead of `<=`.
 - `src/arithmetic_functions.rs`, `src/numerical_functions.rs`: float math goes through
   num's libm-backed `Float` on no_std builds.
 - `build.rs`: every build compiles the IEC sources in-process through the `plc_driver`

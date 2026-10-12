@@ -57,9 +57,7 @@ fn main() {
     // them: wasm targets always compile as a single module, so CI (Linux) and a local
     // Windows build produce the same objects; Windows host targets keep upstream's
     // lld-link workaround.
-    if env::var("TARGET").is_ok_and(|target| target.starts_with("wasm32"))
-        || cfg!(target_os = "windows")
-    {
+    if env::var("TARGET").is_ok_and(|target| target.starts_with("wasm32")) || cfg!(target_os = "windows") {
         args.push("--single-module".to_owned());
     }
 

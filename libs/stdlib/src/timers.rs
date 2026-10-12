@@ -75,11 +75,9 @@ impl TimerParams {
         }
     }
 
-    // FORK(no_std): the preset edge compares with `<` so a TP output drops exactly at
-    // preset time (IEC 61131-5: Q is TRUE while ET < PT), upstream still uses `<=`.
     fn is_in_preset_range(&self) -> bool {
         let duration = Duration::from_millis(self.preset_time as u64);
-        self.get_run_time().is_some_and(|it| it < duration)
+        self.get_run_time().is_some_and(|it| it <= duration)
     }
 
     fn get_run_time(&self) -> Option<Duration> {
@@ -130,11 +128,9 @@ impl TimerParamsLTime {
         }
     }
 
-    // FORK(no_std): the preset edge compares with `<` so a TP output drops exactly at
-    // preset time (IEC 61131-5: Q is TRUE while ET < PT), upstream still uses `<=`.
     fn is_in_preset_range(&self) -> bool {
         let duration = Duration::from_nanos(self.preset_time as u64);
-        self.get_run_time().is_some_and(|it| it < duration)
+        self.get_run_time().is_some_and(|it| it <= duration)
     }
 
     fn get_run_time(&self) -> Option<Duration> {

@@ -36,3 +36,11 @@ jobs:
         env:
           LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
         run: cargo mcu-release
+
+      - name: Upload the wasm libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdlib-wasm
+          path: |
+            target/wasm32-unknown-unknown/release/libiec61131std.a
+            target/wasm32-unknown-unknown/release/iec61131std.wasm

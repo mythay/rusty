@@ -208,9 +208,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -901,9 +899,8 @@ version = "1.0.6"
 dependencies = [
  "cc",
  "chrono",
- "glob",
+ "iec61131std",
  "libloading",
- "log",
  "num",
  "paste",
  "plc-compiler",
@@ -1315,6 +1312,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -1487,6 +1485,7 @@ name = "plc-compiler"
 version = "1.0.6"
 dependencies = [
  "anyhow",
+ "cc",
  "chrono",
  "clap 3.2.25",
  "encoding_rs",
@@ -1497,6 +1496,7 @@ dependencies = [
  "insta",
  "itertools",
  "lazy_static",
+ "llvm-sys",
  "log",
  "logos",
  "num",

@@ -71,6 +71,8 @@ fn main() {
     for name in libs.split(&[' ', '\r', '\n']).filter(|name| !name.is_empty()) {
         let stem = name.rsplit(['\\', '/']).next().unwrap();
         let stem = stem.strip_suffix(".lib").unwrap_or(stem);
+        let stem = stem.strip_suffix(".a").unwrap_or(stem);
+        let stem = stem.strip_prefix("lib").unwrap_or(stem);
         if EXCLUDED_PREFIXES.iter().any(|prefix| stem.starts_with(prefix)) {
             continue;
         }
@@ -79,6 +81,11 @@ fn main() {
 
     let system_libs = run(&llvm_config, &["--system-libs", "--link-static"]);
     for name in system_libs.split(&[' ', '\r', '\n']).filter(|name| !name.is_empty()) {
+        // Windows lists `kernel32.lib`; Unix lists `-l<name>` linker flags.
+        if let Some(stem) = name.strip_prefix("-l") {
+            println!("cargo:rustc-link-lib=dylib={stem}");
+            continue;
+        }
         let stem = name.strip_suffix(".lib").unwrap_or(name);
         println!("cargo:rustc-link-lib={stem}");
     }

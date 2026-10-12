@@ -1,6 +1,5 @@
 // FORK(no_std): `std` builds are ordinary std crates; mcu-wamr builds compile without std.
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
-
 // Definitions of the core standard function modules for IEC61131-3
 
 // A panic in these functions aborts the whole runtime process (most are `extern "C"`),
@@ -32,9 +31,9 @@ pub mod arithmetic_functions;
 pub mod bistable_functionblocks;
 pub mod bit_num_conversion;
 pub mod bit_shift_functions;
+pub mod counters;
 #[cfg(test)]
 mod counting_allocator;
-pub mod counters;
 // FORK(no_std): chrono is not no_std-compatible, these modules only build with `std`.
 #[cfg(feature = "std")]
 pub mod date_time_conversion;
@@ -43,7 +42,8 @@ pub mod date_time_extra_functions;
 #[cfg(feature = "std")]
 pub mod date_time_numeric_functions;
 pub mod endianness_conversion_functions;
-// pub mod extra_functions;
+#[cfg(feature = "std")]
+pub mod extra_functions;
 pub mod flanks;
 pub mod num_conversion;
 // FORK(no_std): the string modules rely on std's allocating `String`, they are cut from

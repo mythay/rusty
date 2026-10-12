@@ -1455,9 +1455,9 @@ name = "iec61131std"
 version = "1.0.6"
 dependencies = [
  "cc",
+ "chrono",
+ "iec61131std",
  "libloading",
- "libm",
- "log",
  "num",
  "paste",
  "plc-compiler",

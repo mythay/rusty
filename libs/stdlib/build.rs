@@ -27,8 +27,7 @@ fn main() {
     for entry in Path::new("iec61131-st").read_dir().unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|ext| ext == "st")
-            && !(exclude_mcu
-                && MCU_EXCLUDED_SOURCES.contains(&path.file_name().unwrap().to_str().unwrap()))
+            && !(exclude_mcu && MCU_EXCLUDED_SOURCES.contains(&path.file_name().unwrap().to_str().unwrap()))
         {
             sources.push(path);
         }

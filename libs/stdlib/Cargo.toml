@@ -48,5 +48,9 @@ mock_time = []
 mcu-wamr = []
 debug = []
 
+# FORK(no_std): upstream v1.0.6 ships `staticlib` only — a cdylib would fail to link
+# because `extra_functions` is commented out upstream, leaving some `{external}` IEC
+# functions unresolved. `lib` is added so the self dev-dependency (integration tests)
+# can link the crate as an rlib.
 [lib]
-crate-type = ["staticlib", "lib", "cdylib"]
+crate-type = ["staticlib", "lib"]

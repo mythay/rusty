@@ -37,6 +37,14 @@ jobs:
           LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
         run: cargo mcu-release
 
+      - name: Upload the wasm libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdlib-wasm
+          path: |
+            target/wasm32-unknown-unknown/release/libiec61131std.a
+            target/wasm32-unknown-unknown/release/iec61131std.wasm
+
   # The wasm-only compiler binary for Windows hosts, so the SDK does not have to be
   # built locally. The exe embeds only the WebAssembly backend.
   plc-exe:

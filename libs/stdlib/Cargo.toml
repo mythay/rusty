@@ -53,4 +53,4 @@ debug = []
 # functions unresolved. `lib` is added so the self dev-dependency (integration tests)
 # can link the crate as an rlib.
 [lib]
-crate-type = ["staticlib", "lib"]
+crate-type = ["staticlib", "lib", "cdylib"]

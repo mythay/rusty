@@ -61,7 +61,7 @@ jobs:
           echo "$llvmBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build the wasm-only compiler
-        run: cargo build --release -p plc_driver --bin plc --features plc-compiler/wasm-only
+        run: cargo build --release --features plc-compiler/wasm-only
 
       - name: Upload the compiler
         uses: actions/upload-artifact@v4

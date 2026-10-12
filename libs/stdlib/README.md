@@ -70,7 +70,7 @@ There is no allocator on the MCU: nothing in a mcu-wamr build may depend on `all
 ## Syncing with upstream (PLC-lang/rusty)
 
 Branch layout: `release/1.0` is the fork's 1.0.x line (v1.0.6 + the fork delta);
-`feature/wasm-stdlib` is the mainline tracking upstream master. Upstream release branches
+`master-wamr` is the mainline tracking upstream master. Upstream release branches
 are **not** pre-emptively mirrored.
 
 | Situation | Action |
@@ -78,4 +78,4 @@ are **not** pre-emptively mirrored.
 | upstream cuts a release on this line (v1.0.7...) | `git fetch upstream --tags && git merge v1.0.7` and re-verify |
 | an upstream fix is needed before the next release | `git cherry-pick <commit>` onto this branch |
 | a fork fix is upstream-worthy | small branch + PR to PLC-lang/rusty; a smaller delta makes every future sync cheaper |
-| porting to a new release line | branch from the new tag and re-apply the delta (see `feature/wasm-stdlib` for the master-based port) |
+| porting to a new release line | branch from the new tag and re-apply the delta (see `master-wamr` for the master-based port) |

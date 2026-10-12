@@ -84,7 +84,6 @@ cc.workspace = true
 
 [workspace]
 members = [
-    "xtask",
     "errorcode_book_generator",
     "libs/stdlib",
     "compiler/plc_driver",

@@ -1,4 +1,6 @@
-# FORK(no_std): verifies the WAMR/MCU build path of libs/stdlib, which no other workflow covers.
+# FORK(no_std): verifies the WAMR/MCU build path of libs/stdlib, and produces the SDK
+# artifacts. A manual run with a `version` input also publishes everything as a GitHub
+# release.
 
 name: MCU (WAMR) Build
 
@@ -8,11 +10,20 @@ on:
   pull_request:
     branches: ["release/[0-9]*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version/tag (e.g. v1.0.6-mcu.1); leave empty for a verification-only run"
+        required: false
+        type: string
 
 jobs:
   build:
     name: wasm32-unknown-unknown (mcu-wamr)
     runs-on: ubuntu-latest
+    env:
+      # The stdlib's build dependency compiles the IEC compiler for the host, so an
+      # LLVM 21 installation must be reachable (LLVM_SYS_211_PREFIX or PATH).
+      LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
     steps:
       - uses: actions/checkout@v6
 
@@ -22,8 +33,6 @@ jobs:
           toolchain: 1.95.0
           targets: wasm32-unknown-unknown
 
-      # The stdlib's build dependency compiles the IEC compiler for the host, so an
-      # LLVM 21 installation must be reachable (LLVM_SYS_211_PREFIX or PATH).
       - name: Install LLVM 21
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
@@ -33,20 +42,32 @@ jobs:
 
       - name: Build the stdlib for WAMR
         working-directory: libs/stdlib
-        env:
-          LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
         run: cargo mcu-release
 
-      - name: Upload the wasm libraries
+      - name: Build the wasm-only Linux compiler
+        run: cargo build --release --features plc-compiler/wasm-only
+
+      - name: Rename the Linux compiler
+        run: cp target/release/plc plc-linux-x86_64
+
+      - name: Upload libiec61131std.a
         uses: actions/upload-artifact@v4
         with:
-          name: stdlib-wasm
-          path: |
-            target/wasm32-unknown-unknown/release/libiec61131std.a
-            target/wasm32-unknown-unknown/release/iec61131std.wasm
+          name: libiec61131std.a
+          path: target/wasm32-unknown-unknown/release/libiec61131std.a
 
-  # The wasm-only compiler binary for Windows hosts, so the SDK does not have to be
-  # built locally. The exe embeds only the WebAssembly backend.
+      - name: Upload iec61131std.wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: iec61131std.wasm
+          path: target/wasm32-unknown-unknown/release/iec61131std.wasm
+
+      - name: Upload plc-linux-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: plc-linux-x86_64
+          path: plc-linux-x86_64
+
   plc-exe:
     name: plc.exe (wasm-only, windows)
     runs-on: windows-2022
@@ -68,14 +89,29 @@ jobs:
           $llvmBin = (Resolve-Path "./llvm/bin").Path
           echo "$llvmBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Build the host stdlib
+        run: cargo build --release -p iec61131std
+
       - name: Build the wasm-only compiler
         run: cargo build --release --features plc-compiler/wasm-only
 
-      - name: Upload the compiler
+      - name: Upload plc.exe
         uses: actions/upload-artifact@v4
         with:
-          name: plc-wasm-only-windows
+          name: plc.exe
           path: target/release/plc.exe
+
+      - name: Upload iec61131std.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: iec61131std.dll
+          path: target/release/iec61131std.dll
+
+      - name: Upload iec61131std.lib
+        uses: actions/upload-artifact@v4
+        with:
+          name: iec61131std.lib
+          path: target/release/iec61131std.lib
 
   pr-artifacts:
     name: PR Artifacts
@@ -137,3 +173,24 @@ jobs:
                 body: `${COMMENT_MARKER}\n### Build Artifacts\n\n${sectionBlock}`,
               });
             }
+
+  publish:
+    name: Publish release
+    if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+    needs: [build, plc-exe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*"
+          merge-multiple: true
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: gh release create "$VERSION" dist/* --title "$VERSION" --generate-notes --target ${{ github.sha }}

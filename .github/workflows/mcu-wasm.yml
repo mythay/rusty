@@ -1,6 +1,6 @@
 # FORK(no_std): verifies the WAMR/MCU build path of libs/stdlib, and produces the SDK
 # artifacts. A manual run with a `version` input also publishes everything as a GitHub
-# release.
+# release, including the downstream toolchain bundle (rusty-x86_64-windows.tar.gz).
 
 name: MCU (WAMR) Build
 
@@ -44,6 +44,10 @@ jobs:
         working-directory: libs/stdlib
         run: cargo mcu-release
 
+      - name: Build the stdlib for WAMR (debug)
+        working-directory: libs/stdlib
+        run: cargo mcu-debug
+
       - name: Build the wasm-only Linux compiler
         run: cargo build --release --features plc-compiler/wasm-only
 
@@ -55,6 +59,12 @@ jobs:
         with:
           name: libiec61131std.a
           path: target/wasm32-unknown-unknown/release/libiec61131std.a
+
+      - name: Upload libiec61131std-debug.a
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61131std-debug.a
+          path: target/wasm32-unknown-unknown/debug/libiec61131std.a
 
       - name: Upload iec61131std.wasm
         uses: actions/upload-artifact@v4
@@ -113,11 +123,41 @@ jobs:
           name: iec61131std.lib
           path: target/release/iec61131std.lib
 
+  bundle:
+    name: Toolchain bundle
+    runs-on: ubuntu-latest
+    needs: [build, plc-exe]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Assemble the bundle
+        run: |
+          mkdir -p rusty-x86_64-windows/lib/include
+          mkdir -p rusty-x86_64-windows/lib/wasm32-unknown-unknown/debug
+          mkdir -p rusty-x86_64-windows/lib/wasm32-unknown-unknown/release
+          cp libs/stdlib/iec61131-st/*.st rusty-x86_64-windows/lib/include/
+          cp dist/plc.exe rusty-x86_64-windows/plc.exe
+          cp dist/libiec61131std.a rusty-x86_64-windows/lib/wasm32-unknown-unknown/release/libiec61131std.a
+          cp dist/libiec61131std-debug.a rusty-x86_64-windows/lib/wasm32-unknown-unknown/debug/libiec61131std.a
+          cp dist/iec61131std.wasm rusty-x86_64-windows/lib/wasm32-unknown-unknown/release/iec61131std.wasm
+          tar -czf rusty-x86_64-windows.tar.gz rusty-x86_64-windows
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: rusty-x86_64-windows.tar.gz
+          path: rusty-x86_64-windows.tar.gz
+
   pr-artifacts:
     name: PR Artifacts
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    needs: [build, plc-exe]
+    needs: [bundle]
     permissions:
       pull-requests: write
     steps:
@@ -177,7 +217,7 @@ jobs:
   publish:
     name: Publish release
     if: github.event_name == 'workflow_dispatch' && inputs.version != ''
-    needs: [build, plc-exe]
+    needs: [bundle]
     runs-on: ubuntu-latest
     permissions:
       contents: write

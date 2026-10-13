@@ -21,6 +21,7 @@ jobs:
     # Skip closed, foreign, Dependabot, and draft pull requests. Dependabot runs receive no secrets, so
     # they would fail on the missing API key
     if: >-
+      github.repository_owner == 'PLC-lang' &&
       github.event.action != 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]' &&

@@ -1,19 +1,23 @@
+// FORK(no_std): without std the float methods come from num's libm-backed `Float`.
+#[cfg(not(any(test, feature = "std")))]
+use num::Float;
+
 #[no_mangle]
-pub static PI_LREAL: f64 = std::f64::consts::PI;
+pub static PI_LREAL: f64 = core::f64::consts::PI;
 #[no_mangle]
-pub static PI_REAL: f32 = std::f32::consts::PI;
+pub static PI_REAL: f32 = core::f32::consts::PI;
 #[no_mangle]
-pub static FRAC_PI_2_LREAL: f64 = std::f64::consts::FRAC_PI_2;
+pub static FRAC_PI_2_LREAL: f64 = core::f64::consts::FRAC_PI_2;
 #[no_mangle]
-pub static FRAC_PI_2_REAL: f32 = std::f32::consts::FRAC_PI_2;
+pub static FRAC_PI_2_REAL: f32 = core::f32::consts::FRAC_PI_2;
 #[no_mangle]
-pub static FRAC_PI_4_LREAL: f64 = std::f64::consts::FRAC_PI_4;
+pub static FRAC_PI_4_LREAL: f64 = core::f64::consts::FRAC_PI_4;
 #[no_mangle]
-pub static FRAC_PI_4_REAL: f32 = std::f32::consts::FRAC_PI_4;
+pub static FRAC_PI_4_REAL: f32 = core::f32::consts::FRAC_PI_4;
 #[no_mangle]
-pub static E_REAL: f32 = std::f32::consts::E;
+pub static E_REAL: f32 = core::f32::consts::E;
 #[no_mangle]
-pub static E_LREAL: f64 = std::f64::consts::E;
+pub static E_LREAL: f64 = core::f64::consts::E;
 #[no_mangle]
 pub static INF_REAL: f32 = f32::INFINITY;
 #[no_mangle]
@@ -29,7 +33,7 @@ pub static NAN_LREAL: f64 = f64::NAN;
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn SQRT__REAL(input: f32) -> f32 {
-    f32::sqrt(input)
+    input.sqrt()
 }
 
 /// .
@@ -38,7 +42,7 @@ pub extern "C" fn SQRT__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn SQRT__LREAL(input: f64) -> f64 {
-    f64::sqrt(input)
+    input.sqrt()
 }
 
 /// .
@@ -47,7 +51,7 @@ pub extern "C" fn SQRT__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn LN__REAL(input: f32) -> f32 {
-    f32::ln(input)
+    input.ln()
 }
 
 /// .
@@ -56,7 +60,7 @@ pub extern "C" fn LN__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn LN__LREAL(input: f64) -> f64 {
-    f64::ln(input)
+    input.ln()
 }
 
 /// .
@@ -65,7 +69,7 @@ pub extern "C" fn LN__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn LOG__REAL(input: f32) -> f32 {
-    f32::log10(input)
+    input.log10()
 }
 
 /// .
@@ -74,7 +78,7 @@ pub extern "C" fn LOG__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn LOG__LREAL(input: f64) -> f64 {
-    f64::log10(input)
+    input.log10()
 }
 
 /// .
@@ -83,7 +87,7 @@ pub extern "C" fn LOG__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn EXP__REAL(input: f32) -> f32 {
-    f32::exp(input)
+    input.exp()
 }
 
 /// .
@@ -92,7 +96,7 @@ pub extern "C" fn EXP__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn EXP__LREAL(input: f64) -> f64 {
-    f64::exp(input)
+    input.exp()
 }
 
 ///
@@ -102,7 +106,7 @@ pub extern "C" fn EXP__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn SIN__REAL(input: f32) -> f32 {
-    f32::sin(input)
+    input.sin()
 }
 
 /// .
@@ -111,7 +115,7 @@ pub extern "C" fn SIN__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn SIN__LREAL(input: f64) -> f64 {
-    f64::sin(input)
+    input.sin()
 }
 
 /// .
@@ -120,7 +124,7 @@ pub extern "C" fn SIN__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn COS__REAL(input: f32) -> f32 {
-    f32::cos(input)
+    input.cos()
 }
 
 /// .
@@ -129,7 +133,7 @@ pub extern "C" fn COS__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn COS__LREAL(input: f64) -> f64 {
-    f64::cos(input)
+    input.cos()
 }
 
 /// .
@@ -138,7 +142,7 @@ pub extern "C" fn COS__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn TAN__REAL(input: f32) -> f32 {
-    f32::tan(input)
+    input.tan()
 }
 
 /// .
@@ -147,7 +151,7 @@ pub extern "C" fn TAN__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn TAN__LREAL(input: f64) -> f64 {
-    f64::tan(input)
+    input.tan()
 }
 
 /// .
@@ -156,7 +160,7 @@ pub extern "C" fn TAN__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn ASIN__REAL(input: f32) -> f32 {
-    f32::asin(input)
+    input.asin()
 }
 
 /// .
@@ -165,7 +169,7 @@ pub extern "C" fn ASIN__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn ASIN__LREAL(input: f64) -> f64 {
-    f64::asin(input)
+    input.asin()
 }
 
 /// .
@@ -174,7 +178,7 @@ pub extern "C" fn ASIN__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn ACOS__REAL(input: f32) -> f32 {
-    f32::acos(input)
+    input.acos()
 }
 
 /// .
@@ -184,7 +188,7 @@ pub extern "C" fn ACOS__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn ACOS__LREAL(input: f64) -> f64 {
-    f64::acos(input)
+    input.acos()
 }
 
 /// .
@@ -193,7 +197,7 @@ pub extern "C" fn ACOS__LREAL(input: f64) -> f64 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn ATAN__REAL(input: f32) -> f32 {
-    f32::atan(input)
+    input.atan()
 }
 
 /// .
@@ -202,7 +206,7 @@ pub extern "C" fn ATAN__REAL(input: f32) -> f32 {
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn ATAN__LREAL(input: f64) -> f64 {
-    f64::atan(input)
+    input.atan()
 }
 
 /// .

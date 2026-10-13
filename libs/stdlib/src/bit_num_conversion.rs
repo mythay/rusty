@@ -1,3 +1,7 @@
+// FORK(no_std): without std the float methods come from num's libm-backed `Float`.
+#[cfg(not(any(test, feature = "std")))]
+use num::Float;
+
 /// One past the largest value a signed 64-bit integer can hold, as a float: 2^63.
 const I64_RANGE_END: f64 = (i64::MAX as u128 + 1) as f64;
 

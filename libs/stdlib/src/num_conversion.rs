@@ -1,3 +1,7 @@
+// FORK(no_std): without std the float methods come from num's libm-backed `Float`.
+#[cfg(not(any(test, feature = "std")))]
+use num::Float;
+
 macro_rules! define_rounding_conversion {
     ($name:ident, $input_ty:ty, $output_ty:ty) => {
         #[allow(non_snake_case)]

@@ -1,13 +1,18 @@
-use std::time::Duration;
-#[cfg(not(feature = "mock_time"))]
-use std::time::Instant;
+use core::time::Duration;
 
-#[cfg(feature = "mock_time")]
+// FORK(no_std): upstream uses std::time::Instant unless mock_time is enabled. On mcu-wamr
+// builds there is no OS clock, so the mock clock is the production clock: the WAMR host
+// advances it once per PLC cycle through `__mock_time_advance_ns`.
+#[cfg(any(feature = "mock_time", not(feature = "std")))]
 use test_time_helpers::Instant;
+
+#[cfg(all(not(feature = "mock_time"), feature = "std"))]
+use std::time::Instant;
 
 use crate::utils::Signal;
 
-#[cfg(feature = "mock_time")]
+// FORK(no_std): also compiled as the production clock on mcu-wamr builds.
+#[cfg(any(feature = "mock_time", not(feature = "std")))]
 pub mod test_time_helpers;
 
 pub type Time = i64;
@@ -53,16 +58,20 @@ impl TimerParams {
     fn update_elapsed_time(&mut self) {
         if self.is_running() {
             debug_assert!(self.start_time.is_some(), "a running timer must have a start time");
-            self.set_elapsed_time(std::cmp::min(
+            self.set_elapsed_time(core::cmp::min(
                 self.preset_time,
                 self.get_run_time().unwrap_or_default().as_nanos() as i64,
             ));
         }
     }
 
+    // FORK(no_std): compares with `<` so every FB flips its output exactly at ET == PT,
+    // as the IEC 61131-3 timing diagrams define (TP pulse ends, TON switches on, TOF
+    // delay ends). Upstream still uses `<=`, which flips one resolution tick late and is
+    // locked in by upstream's LTIME tests.
     fn is_in_preset_range(&self) -> bool {
         let duration = Duration::from_nanos(self.preset_time as u64);
-        self.get_run_time().is_some_and(|it| it <= duration)
+        self.get_run_time().is_some_and(|it| it < duration)
     }
 
     fn get_run_time(&self) -> Option<Duration> {

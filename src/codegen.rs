@@ -113,8 +113,13 @@ impl<'ink> CodeGen<'ink> {
         let module = context.create_module(module_location);
         module.set_source_file_name(module_location);
 
-        // Initialize all targets
+        // FORK(no_std): `wasm-only` SDK builds link only the WebAssembly backend (see
+        // build.rs), so only that can be initialized; regular builds initialize all
+        // targets like upstream.
         let initialization_config = &InitializationConfig::default();
+        #[cfg(feature = "wasm-only")]
+        inkwell::targets::Target::initialize_webassembly(initialization_config);
+        #[cfg(not(feature = "wasm-only"))]
         inkwell::targets::Target::initialize_all(initialization_config);
         let triple = target.get_target_triple();
 
@@ -552,7 +557,13 @@ impl<'ink> GeneratedModule<'ink> {
         target: &Target,
         optimization_level: OptimizationLevel,
     ) -> Result<PathBuf, CodegenError> {
+        // FORK(no_std): `wasm-only` SDK builds link only the WebAssembly backend (see
+        // build.rs), so only that can be initialized; regular builds initialize all
+        // targets like upstream.
         let initialization_config = &InitializationConfig::default();
+        #[cfg(feature = "wasm-only")]
+        inkwell::targets::Target::initialize_webassembly(initialization_config);
+        #[cfg(not(feature = "wasm-only"))]
         inkwell::targets::Target::initialize_all(initialization_config);
 
         let triple = target.get_target_triple();

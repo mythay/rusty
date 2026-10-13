@@ -16,8 +16,18 @@ categories = ["development-tools::build-utils"]
 [features]
 default = []
 verify = []
+# FORK(no_std): SDK builds link only the WebAssembly backend; host backends and the JIT
+# are left out. See build.rs (library filtering and stubs) and src/codegen.rs.
+wasm-only = [
+    "inkwell/llvm21-1-no-llvm-linking",
+    "inkwell/target-webassembly",
+    "llvm-sys/disable-alltargets-init",
+]
 
 [dependencies]
+# FORK(no_std): compile-time only; the `wasm-only` feature turns on
+# disable-alltargets-init so llvm-sys skips its AllTargets wrappers (see build.rs).
+llvm-sys = { version = "211.0" }
 plc_source = { path = "./compiler/plc_source", version = "1.0.6" }
 plc_ast = { path = "./compiler/plc_ast", version = "1.0.6" }
 plc_lexer = { path = "./compiler/plc_lexer", version = "1.0.6" }
@@ -36,7 +46,7 @@ plc_derive = { path = "./compiler/plc_derive", version = "1.0.6" }
 which.workspace = true
 siphasher = "1"
 log.workspace = true
-inkwell.workspace = true
+inkwell = { workspace = true, features = ["llvm21-1"] }
 chrono.workspace = true
 itertools.workspace = true
 anyhow.workspace = true
@@ -67,6 +77,10 @@ tabled = "0.20.0"
 [lib]
 name = "rusty"
 path = "src/lib.rs"
+
+# FORK(no_std): compiles llvm_target_stubs.c, see that file.
+[build-dependencies]
+cc.workspace = true
 
 [workspace]
 members = [
@@ -115,3 +129,12 @@ regex = "1"
 glob = "0.3"
 cc = "1.0"
 which = "8.0"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = "z"
+
+# [profile.dev]
+# panic = "abort"

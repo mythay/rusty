@@ -1,21 +1,17 @@
 // This module is mostly copied from `https://github.com/museun/mock_instant`
 // The reason is that the repository has not been updated in a while.
+//
+// FORK(no_std): upstream only uses this under `mock_time` for tests. On mcu-wamr builds
+// it is also the production clock, driven by the WAMR host through the two exported
+// functions at the bottom of this file.
 
-use std::{
-    sync::{LazyLock, Mutex},
-    time::Duration,
-};
+use core::sync::atomic::{AtomicU64, Ordering};
+use core::time::Duration;
 
-pub static TIME: LazyLock<Mutex<Duration>> = LazyLock::new(|| Mutex::new(Duration::default()));
-
-pub fn with_time(d: impl Fn(&mut Duration)) {
-    if let Ok(mut time) = TIME.lock() {
-        d(&mut *time);
-    }
-}
+pub static TIME: AtomicU64 = AtomicU64::new(0);
 
 pub fn get_time() -> Duration {
-    TIME.lock().map(|time| *time).unwrap_or_default()
+    Duration::from_nanos(TIME.load(Ordering::SeqCst))
 }
 
 /// A Mock clock
@@ -24,21 +20,15 @@ pub fn get_time() -> Duration {
 #[derive(Copy, Clone)]
 pub struct MockClock;
 
-impl std::fmt::Debug for MockClock {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockClock").field("time", &Self::time()).finish()
-    }
-}
-
 impl MockClock {
     /// Set the internal clock to this 'Duration'
     pub fn set_time(time: Duration) {
-        with_time(|t| *t = time);
+        TIME.store(time.as_nanos() as u64, Ordering::SeqCst);
     }
 
     /// Advance the internal clock by this 'Duration'
     pub fn advance(time: Duration) {
-        with_time(|t| *t += time);
+        TIME.fetch_add(time.as_nanos() as u64, Ordering::SeqCst);
     }
 
     /// Get the current duration
@@ -47,13 +37,13 @@ impl MockClock {
     }
 }
 
-#[cfg(feature = "mock_time")]
+#[cfg(any(feature = "mock_time", not(feature = "std")))]
 #[no_mangle]
 pub extern "C" fn __mock_time_set_ns(nanos: u64) {
     MockClock::set_time(Duration::from_nanos(nanos));
 }
 
-#[cfg(feature = "mock_time")]
+#[cfg(any(feature = "mock_time", not(feature = "std")))]
 #[no_mangle]
 pub extern "C" fn __mock_time_advance_ns(nanos: u64) {
     MockClock::advance(Duration::from_nanos(nanos));

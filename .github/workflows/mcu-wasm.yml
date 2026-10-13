@@ -60,11 +60,14 @@ jobs:
           name: libiec61131std.a
           path: target/wasm32-unknown-unknown/release/libiec61131std.a
 
+      - name: Rename the debug stdlib
+        run: cp target/wasm32-unknown-unknown/debug/libiec61131std.a libiec61131std-debug.a
+
       - name: Upload libiec61131std-debug.a
         uses: actions/upload-artifact@v4
         with:
           name: libiec61131std-debug.a
-          path: target/wasm32-unknown-unknown/debug/libiec61131std.a
+          path: libiec61131std-debug.a
 
       - name: Upload iec61131std.wasm
         uses: actions/upload-artifact@v4
